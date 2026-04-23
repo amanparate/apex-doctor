@@ -1,4 +1,5 @@
 import { ParsedLog, LogEvent } from './parser';
+import * as vscode from 'vscode';
 
 export interface Issue {
   severity: 'fatal' | 'error' | 'warning' | 'info';
@@ -13,6 +14,16 @@ export interface SoqlEntry { query: string; rows?: number; durationMs?: number; 
 export interface DmlEntry { operation: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; }
 export interface MethodEntry { name: string; lineNumber?: number; durationMs: number; timestamp: string; }
 export interface DebugEntry { level: string; message: string; lineNumber?: number; timestamp: string; }
+
+export interface FlameNode {
+  name: string;
+  kind: 'code_unit' | 'method' | 'soql' | 'dml' | 'callout' | 'root';
+  startNs: number;
+  endNs: number;
+  durationMs: number;
+  lineNumber?: number;
+  children: FlameNode[];
+}
 
 export interface Analysis {
   summary: {
@@ -31,6 +42,7 @@ export interface Analysis {
   limits: string[];
   codeUnits: { name: string; durationMs: number; timestamp: string }[];
   userInfo?: { Name: string; Username: string; Email: string; ProfileName?: string };
+  flameRoot: FlameNode;
 }
 
 export class ApexLogAnalyzer {
@@ -46,50 +58,94 @@ export class ApexLogAnalyzer {
     let execStart: LogEvent | undefined;
     let execEnd: LogEvent | undefined;
 
+    // Parallel stacks for durations
     const methodStack: { ev: LogEvent; name: string }[] = [];
     const soqlStack: { ev: LogEvent; query: string }[] = [];
     const dmlStack: { ev: LogEvent; op: string; rows?: number }[] = [];
     const codeUnitStack: { ev: LogEvent; name: string }[] = [];
 
+    // Flame-graph tree built via an "active" stack
+    const flameRoot: FlameNode = {
+      name: 'Execution', kind: 'root',
+      startNs: 0, endNs: 0, durationMs: 0,
+      children: []
+    };
+    const flameStack: FlameNode[] = [flameRoot];
+
+    const openNode = (ev: LogEvent, name: string, kind: FlameNode['kind']) => {
+      const node: FlameNode = {
+        name, kind,
+        startNs: ev.nanoseconds,
+        endNs: ev.nanoseconds,
+        durationMs: 0,
+        lineNumber: ev.lineNumber,
+        children: []
+      };
+      flameStack[flameStack.length - 1].children.push(node);
+      flameStack.push(node);
+    };
+
+    const closeNode = (ev: LogEvent) => {
+      if (flameStack.length <= 1) {return;}
+      const node = flameStack.pop()!;
+      node.endNs = ev.nanoseconds;
+      node.durationMs = (node.endNs - node.startNs) / 1e6;
+    };
+
     for (const ev of parsed.events) {
       switch (ev.eventType) {
-        case 'EXECUTION_STARTED': execStart = ev; break;
-        case 'EXECUTION_FINISHED': execEnd = ev; break;
+        case 'EXECUTION_STARTED':
+          execStart = ev;
+          flameRoot.startNs = ev.nanoseconds;
+          break;
+        case 'EXECUTION_FINISHED':
+          execEnd = ev;
+          flameRoot.endNs = ev.nanoseconds;
+          flameRoot.durationMs = (flameRoot.endNs - flameRoot.startNs) / 1e6;
+          break;
 
         case 'CODE_UNIT_STARTED': {
           const parts = ev.details.split('|');
-          codeUnitStack.push({ ev, name: parts[parts.length - 1] || ev.details });
+          const name = parts[parts.length - 1] || ev.details;
+          codeUnitStack.push({ ev, name });
+          openNode(ev, name, 'code_unit');
           break;
         }
         case 'CODE_UNIT_FINISHED': {
           const opened = codeUnitStack.pop();
-          if (opened) codeUnits.push({
+          if (opened) {codeUnits.push({
             name: opened.name,
             durationMs: (ev.nanoseconds - opened.ev.nanoseconds) / 1e6,
             timestamp: opened.ev.timestamp
-          });
+          });}
+          closeNode(ev);
           break;
         }
 
         case 'METHOD_ENTRY': {
           const parts = ev.details.split('|');
-          methodStack.push({ ev, name: parts[parts.length - 1] });
+          const name = parts[parts.length - 1];
+          methodStack.push({ ev, name });
+          openNode(ev, name, 'method');
           break;
         }
         case 'METHOD_EXIT': {
           const opened = methodStack.pop();
-          if (opened) methods.push({
+          if (opened) {methods.push({
             name: opened.name,
             lineNumber: opened.ev.lineNumber,
             durationMs: (ev.nanoseconds - opened.ev.nanoseconds) / 1e6,
             timestamp: opened.ev.timestamp
-          });
+          });}
+          closeNode(ev);
           break;
         }
 
         case 'SOQL_EXECUTE_BEGIN': {
           const parts = ev.details.split('|');
-          soqlStack.push({ ev, query: parts[parts.length - 1] || ev.details });
+          const query = parts[parts.length - 1] || ev.details;
+          soqlStack.push({ ev, query });
+          openNode(ev, `SOQL: ${query.slice(0, 60)}…`, 'soql');
           break;
         }
         case 'SOQL_EXECUTE_END': {
@@ -102,17 +158,16 @@ export class ApexLogAnalyzer {
             lineNumber: opened?.ev.lineNumber,
             timestamp: opened?.ev.timestamp || ev.timestamp
           });
+          closeNode(ev);
           break;
         }
 
         case 'DML_BEGIN': {
           const opMatch = /Op:(\w+)/.exec(ev.details);
           const rowsMatch = /Rows:(\d+)/.exec(ev.details);
-          dmlStack.push({
-            ev,
-            op: opMatch ? opMatch[1] : 'UNKNOWN',
-            rows: rowsMatch ? Number(rowsMatch[1]) : undefined
-          });
+          const op = opMatch ? opMatch[1] : 'UNKNOWN';
+          dmlStack.push({ ev, op, rows: rowsMatch ? Number(rowsMatch[1]) : undefined });
+          openNode(ev, `DML: ${op}`, 'dml');
           break;
         }
         case 'DML_END': {
@@ -124,8 +179,16 @@ export class ApexLogAnalyzer {
             lineNumber: opened?.ev.lineNumber,
             timestamp: opened?.ev.timestamp || ev.timestamp
           });
+          closeNode(ev);
           break;
         }
+
+        case 'CALLOUT_REQUEST':
+          openNode(ev, 'CALLOUT', 'callout');
+          break;
+        case 'CALLOUT_RESPONSE':
+          closeNode(ev);
+          break;
 
         case 'USER_DEBUG': {
           const parts = ev.details.split('|');
@@ -167,9 +230,14 @@ export class ApexLogAnalyzer {
       }
     }
 
-    // Heuristic warnings
+    // Read thresholds from user settings
+    const config = vscode.workspace.getConfiguration('apexLogAnalyzer');
+    const largeQueryThreshold = config.get<number>('largeQueryThreshold') ?? 1000;
+    const soqlInLoopThreshold = config.get<number>('soqlInLoopThreshold') ?? 5;
+
+    // Heuristic: large and slow queries
     for (const q of soql) {
-      if ((q.rows ?? 0) > 1000) {
+      if ((q.rows ?? 0) >= largeQueryThreshold) {
         issues.push({
           severity: 'warning',
           type: 'Large Query Result',
@@ -190,6 +258,33 @@ export class ApexLogAnalyzer {
         });
       }
     }
+
+    // Heuristic: SOQL-in-loop detection (group by normalised query text)
+    const queryFrequency = new Map<string, SoqlEntry[]>();
+    for (const q of soql) {
+      // Normalise bind-variable differences: :oppIds, 'abc', 12345 become placeholders
+      const key = q.query
+        .replace(/:\w+/g, ':?')
+        .replace(/'[^']*'/g, "'?'")
+        .replace(/\b\d+\b/g, '?')
+        .trim();
+      if (!queryFrequency.has(key)) {queryFrequency.set(key, []);}
+      queryFrequency.get(key)!.push(q);
+    }
+    for (const [normalisedQuery, entries] of queryFrequency) {
+      if (entries.length >= soqlInLoopThreshold) {
+        issues.push({
+          severity: 'error',
+          type: 'SOQL in Loop',
+          message: `Same query executed ${entries.length} times — likely inside a loop`,
+          lineNumber: entries[0].lineNumber,
+          timestamp: entries[0].timestamp,
+          context: `Bulkify: collect IDs into a Set, then run ONE query with WHERE ... IN :ids. Query pattern: ${normalisedQuery.slice(0, 200)}`
+        });
+      }
+    }
+
+    // Governor limit warnings
     if (soql.length > 100) {
       issues.push({
         severity: 'error',
@@ -209,6 +304,17 @@ export class ApexLogAnalyzer {
       });
     }
 
+    // Close any lingering flame nodes (defensive, in case the log ended mid-stack)
+    while (flameStack.length > 1) {
+      const node = flameStack.pop()!;
+      node.endNs = flameRoot.endNs || node.startNs;
+      node.durationMs = (node.endNs - node.startNs) / 1e6;
+    }
+    if (flameRoot.endNs === 0 && parsed.events.length > 0) {
+      flameRoot.endNs = parsed.events[parsed.events.length - 1].nanoseconds;
+      flameRoot.durationMs = (flameRoot.endNs - flameRoot.startNs) / 1e6;
+    }
+
     return {
       summary: {
         apiVersion: parsed.apiVersion,
@@ -224,7 +330,8 @@ export class ApexLogAnalyzer {
       methods: methods.sort((a, b) => b.durationMs - a.durationMs).slice(0, 50),
       debugs,
       limits,
-      codeUnits
+      codeUnits,
+      flameRoot
     };
   }
 

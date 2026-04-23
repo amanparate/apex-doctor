@@ -52,7 +52,7 @@ export class ApexLogParser {
     const logLevels: Record<string, string> = {};
     for (const pair of levelsStr.split(';')) {
       const [k, v] = pair.split(',');
-      if (k && v) logLevels[k.trim()] = v.trim();
+      if (k && v) {logLevels[k.trim()] = v.trim();}
     }
     return { apiVersion, logLevels };
   }

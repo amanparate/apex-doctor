@@ -30,7 +30,7 @@ export class AiService {
       validateInput: (v) =>
         v && v.startsWith(prefix) ? null : `Must start with ${prefix}`
     });
-    if (!key) return false;
+    if (!key) {return false;}
     await this.secrets.store(SECRET_KEY, key);
     vscode.window.showInformationMessage(`${label} API key saved securely.`);
     return true;
@@ -45,7 +45,7 @@ export class AiService {
     let key = await this.secrets.get(SECRET_KEY);
     if (!key) {
       const set = await this.setApiKey();
-      if (set) key = await this.secrets.get(SECRET_KEY);
+      if (set) {key = await this.secrets.get(SECRET_KEY);}
     }
     return key;
   }
@@ -203,9 +203,9 @@ ${context}`;
         buffer = parts.pop() || '';
         for (const part of parts) {
           for (const line of part.split('\n')) {
-            if (!line.startsWith('data:')) continue;
+            if (!line.startsWith('data:')) {continue;}
             const payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') continue;
+            if (!payload || payload === '[DONE]') {continue;}
             try {
               const evt = JSON.parse(payload);
               if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && typeof evt.delta.text === 'string') {
@@ -253,9 +253,9 @@ ${context}`;
         buffer = parts.pop() || '';
         for (const part of parts) {
           for (const line of part.split('\n')) {
-            if (!line.startsWith('data:')) continue;
+            if (!line.startsWith('data:')) {continue;}
             const payload = line.slice(5).trim();
-            if (!payload || payload === '[DONE]') continue;
+            if (!payload || payload === '[DONE]') {continue;}
             try {
               const evt = JSON.parse(payload);
               const delta = evt.choices?.[0]?.delta?.content;

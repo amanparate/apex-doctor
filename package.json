@@ -1,59 +1,30 @@
 {
   "name": "apex-log-analyzer-by-aman",
   "displayName": "Apex Log Analyzer by Aman",
-  "description": "Analyse Salesforce Apex debug logs with AI-assisted root-cause explanations",
-  "version": "0.1.0",
+  "description": "Analyse Salesforce Apex debug logs with AI-assisted root-cause explanations, flame graphs, and SOQL-in-loop detection",
+  "version": "0.2.0",
   "publisher": "aman",
-  "engines": {
-    "vscode": "^1.116.0"
-  },
-  "categories": [
-    "Other",
-    "Debuggers"
-  ],
-  "keywords": [
-    "salesforce",
-    "apex",
-    "log",
-    "debug",
-    "analyzer",
-    "ai"
-  ],
+  "engines": { "vscode": "^1.116.0" },
+  "categories": ["Other", "Debuggers"],
+  "keywords": ["salesforce", "apex", "log", "debug", "analyzer", "ai", "flame graph"],
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "apexLogAnalyzer.analyze",
-        "title": "Analyse this Apex Log",
-        "category": "Apex Log Analyzer"
-      },
-      {
-        "command": "apexLogAnalyzer.syncUser",
-        "title": "Sync with Salesforce Org (Fetch User Info)",
-        "category": "Apex Log Analyzer"
-      },
-      {
-        "command": "apexLogAnalyzer.setApiKey",
-        "title": "Set LLM API Key",
-        "category": "Apex Log Analyzer"
-      },
-      {
-        "command": "apexLogAnalyzer.clearApiKey",
-        "title": "Clear LLM API Key",
-        "category": "Apex Log Analyzer"
-      }
+      { "command": "apexLogAnalyzer.analyze", "title": "Analyse this Apex Log", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.fetchLog", "title": "Fetch Log from Salesforce", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.exportMarkdown", "title": "Export Analysis as Markdown", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.setApiKey", "title": "Set LLM API Key", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.clearApiKey", "title": "Clear LLM API Key", "category": "Apex Log Analyzer" }
     ],
     "menus": {
       "editor/context": [
-        {
-          "command": "apexLogAnalyzer.analyze",
-          "group": "1_apexLogAnalyzer@1"
-        }
+        { "command": "apexLogAnalyzer.analyze", "group": "1_apexLogAnalyzer@1" }
       ],
       "commandPalette": [
         { "command": "apexLogAnalyzer.analyze" },
-        { "command": "apexLogAnalyzer.syncUser" },
+        { "command": "apexLogAnalyzer.fetchLog" },
+        { "command": "apexLogAnalyzer.exportMarkdown" },
         { "command": "apexLogAnalyzer.setApiKey" },
         { "command": "apexLogAnalyzer.clearApiKey" }
       ]
@@ -69,13 +40,23 @@
         },
         "apexLogAnalyzer.model": {
           "type": "string",
-          "default": "google/gemini-2.0-flash-exp:free",
-          "description": "Model name. For OpenRouter: 'google/gemini-2.0-flash-exp:free' or 'meta-llama/llama-3.3-70b-instruct:free'. For Anthropic: 'claude-sonnet-4-5'."
+          "default": "openrouter/free",
+          "description": "Model name. OpenRouter: 'openrouter/free' or any ':free' model. Anthropic: 'claude-sonnet-4-5'."
         },
         "apexLogAnalyzer.maxTokens": {
           "type": "number",
           "default": 1500,
           "description": "Maximum tokens for AI response."
+        },
+        "apexLogAnalyzer.soqlInLoopThreshold": {
+          "type": "number",
+          "default": 5,
+          "description": "Flag SOQL-in-loop when the same query repeats at least this many times."
+        },
+        "apexLogAnalyzer.largeQueryThreshold": {
+          "type": "number",
+          "default": 1000,
+          "description": "Flag a SOQL query as 'large' when it returns at least this many rows."
         }
       }
     }

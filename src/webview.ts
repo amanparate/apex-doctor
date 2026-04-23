@@ -1,4 +1,5 @@
 import { Analysis } from './analyzer';
+import { renderAreaChartHtml } from './areaChart';
 
 export function renderAnalysisHtml(a: Analysis): string {
   const fmt = (n?: number) => (n ?? 0).toFixed(2);
@@ -13,7 +14,7 @@ export function renderAnalysisHtml(a: Analysis): string {
         <div class="row">
           <span class="badge ${i.severity}">${i.severity.toUpperCase()}</span>
           <strong>${esc(i.type)}</strong>
-          ${i.lineNumber ? `<span class="muted">line ${i.lineNumber}</span>` : ''}
+          ${i.lineNumber ? `<a href="#" class="line-link" data-line="${i.lineNumber}">line ${i.lineNumber}</a>` : ''}
           <span class="muted">@ ${esc(i.timestamp)}</span>
           <button class="mini" onclick="explainIssue(${idx})">🤖 Explain this</button>
         </div>
@@ -29,23 +30,26 @@ export function renderAnalysisHtml(a: Analysis): string {
          <div class="muted">${esc(a.userInfo.Username)} · ${esc(a.userInfo.Email)}${a.userInfo.ProfileName ? ' · ' + esc(a.userInfo.ProfileName) : ''}</div>
        </div>` : '';
 
+  const lineLink = (line?: number) =>
+    line ? `<a href="#" class="line-link" data-line="${line}">${line}</a>` : '-';
+
   const soqlHtml = a.soql.length
     ? `<table><tr><th>#</th><th>Duration</th><th>Rows</th><th>Line</th><th>Query</th></tr>
-        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? '-'}</td><td>${q.lineNumber ?? '-'}</td><td><code>${esc(q.query)}</code></td></tr>`).join('')}
+        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? '-'}</td><td>${lineLink(q.lineNumber)}</td><td><code>${esc(q.query)}</code></td></tr>`).join('')}
       </table>` : `<p class="muted">No SOQL executed.</p>`;
 
   const dmlHtml = a.dml.length
     ? `<table><tr><th>#</th><th>Op</th><th>Rows</th><th>Duration</th><th>Line</th></tr>
-        ${a.dml.map((d, i) => `<tr><td>${i + 1}</td><td>${esc(d.operation)}</td><td>${d.rows ?? '-'}</td><td>${fmt(d.durationMs)} ms</td><td>${d.lineNumber ?? '-'}</td></tr>`).join('')}
+        ${a.dml.map((d, i) => `<tr><td>${i + 1}</td><td>${esc(d.operation)}</td><td>${d.rows ?? '-'}</td><td>${fmt(d.durationMs)} ms</td><td>${lineLink(d.lineNumber)}</td></tr>`).join('')}
       </table>` : `<p class="muted">No DML executed.</p>`;
 
   const methodsHtml = a.methods.length
     ? `<table><tr><th>Method</th><th>Duration</th><th>Line</th></tr>
-        ${a.methods.map(m => `<tr><td><code>${esc(m.name)}</code></td><td>${fmt(m.durationMs)} ms</td><td>${m.lineNumber ?? '-'}</td></tr>`).join('')}
+        ${a.methods.map(m => `<tr><td><code>${esc(m.name)}</code></td><td>${fmt(m.durationMs)} ms</td><td>${lineLink(m.lineNumber)}</td></tr>`).join('')}
       </table>` : `<p class="muted">No method timing data.</p>`;
 
   const debugsHtml = a.debugs.length
-    ? a.debugs.map(d => `<div class="debug"><span class="muted">${esc(d.timestamp)} · line ${d.lineNumber ?? '-'} · [${esc(d.level)}]</span><pre>${esc(d.message)}</pre></div>`).join('')
+    ? a.debugs.map(d => `<div class="debug"><span class="muted">${esc(d.timestamp)} · line ${lineLink(d.lineNumber)} · [${esc(d.level)}]</span><pre>${esc(d.message)}</pre></div>`).join('')
     : `<p class="muted">No debug statements.</p>`;
 
   const codeUnitsHtml = a.codeUnits.length
@@ -56,6 +60,8 @@ export function renderAnalysisHtml(a: Analysis): string {
   const limitsHtml = a.limits.length
     ? a.limits.map(l => `<pre>${esc(l)}</pre>`).join('')
     : `<p class="muted">No limit usage block found.</p>`;
+
+  const flameHtml = renderAreaChartHtml(a.flameRoot);
 
   return `<!DOCTYPE html>
   <html><head><meta charset="utf-8"><style>
@@ -87,6 +93,7 @@ export function renderAnalysisHtml(a: Analysis): string {
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
     .tagline { opacity: 0.6; font-size: 12px; margin: 0 0 8px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
     .ai-panel { background: linear-gradient(135deg, rgba(155, 89, 182, 0.08), rgba(52, 152, 219, 0.08)); border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 16px; margin-top: 16px; }
     .ai-panel h3 { margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
     #ai-output { white-space: pre-wrap; font-size: 13px; line-height: 1.6; min-height: 20px; }
@@ -94,7 +101,12 @@ export function renderAnalysisHtml(a: Analysis): string {
     #ai-output code { background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; }
     .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--vscode-foreground); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    .line-link { color: var(--vscode-textLink-foreground); text-decoration: none; cursor: pointer; }
+    .line-link:hover { text-decoration: underline; }
+    .flame-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .flame-block:hover rect { stroke: #fff; stroke-width: 1.5; }
+    .flame-tooltip { position: absolute; background: var(--vscode-editorHoverWidget-background); border: 1px solid var(--vscode-editorHoverWidget-border); padding: 8px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; max-width: 400px; z-index: 1000; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    #followup-placeholder { margin-top: 12px; padding: 10px; background: var(--vscode-editorWidget-background); border: 1px dashed var(--vscode-panel-border); border-radius: 4px; font-size: 12px; opacity: 0.7; }
   </style></head>
   <body>
     <h1>Apex Log Analyzer by Aman</h1>
@@ -113,16 +125,20 @@ export function renderAnalysisHtml(a: Analysis): string {
 
     <div class="actions">
       <button onclick="explainAll()" id="btn-explain-all">🤖 Explain root cause with AI</button>
-      <button onclick="syncUser()">🔗 Sync with Salesforce Org</button>
+      <button onclick="exportMarkdown()">📋 Copy as Markdown</button>
     </div>
 
     <div class="ai-panel" id="ai-panel" style="display:none">
       <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>
       <div id="ai-output"></div>
+      <div id="followup-placeholder">💬 Follow-up chat coming in v0.3 — you'll be able to ask things like "what would happen if we made this query selective?"</div>
     </div>
 
     <h2>🛑 Issues &amp; Errors</h2>
     ${issuesHtml}
+
+    <h2>📈 Activity Timeline</h2>
+    ${flameHtml}
 
     <h2>📊 Code Units</h2>
     ${codeUnitsHtml}
@@ -148,12 +164,14 @@ export function renderAnalysisHtml(a: Analysis): string {
       const output = document.getElementById('ai-output');
       const spinner = document.getElementById('ai-spinner');
       const btnAll = document.getElementById('btn-explain-all');
+      let lastAiText = '';
 
-      function syncUser() { vscode.postMessage({ command: 'syncUser' }); }
+      function exportMarkdown() { vscode.postMessage({ command: 'exportMarkdown', aiText: lastAiText }); }
 
       function explainAll() {
         panel.style.display = 'block';
         output.textContent = '';
+        lastAiText = '';
         spinner.style.display = 'inline-block';
         btnAll.disabled = true;
         vscode.postMessage({ command: 'explainAll' });
@@ -162,17 +180,16 @@ export function renderAnalysisHtml(a: Analysis): string {
       function explainIssue(idx) {
         panel.style.display = 'block';
         output.textContent = '';
+        lastAiText = '';
         spinner.style.display = 'inline-block';
         btnAll.disabled = true;
         vscode.postMessage({ command: 'explainIssue', index: idx });
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
-      // Very small markdown renderer for **bold**, \`code\`, and line breaks.
       function appendMarkdown(text) {
-        // escape then re-substitute the markers
-        let html = text
-          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        lastAiText += text;
+        let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
         html = html.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
         output.innerHTML += html;
