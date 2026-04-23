@@ -4,6 +4,9 @@ import { ApexLogAnalyzer, Analysis } from './analyzer';
 import { SalesforceService, ApexLogRecord } from './salesforceService';
 import { AiService } from './aiService';
 import { renderAnalysisHtml } from './webview';
+import { StreamingService } from './streamingService';
+import { StreamView } from './streamView';
+import { ApexClassResolver } from './apexClassResolver';
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
@@ -14,6 +17,80 @@ export function activate(context: vscode.ExtensionContext) {
   const analyzer = new ApexLogAnalyzer();
   const sf = new SalesforceService();
   const ai = new AiService(context.secrets);
+  const classResolver = new ApexClassResolver();
+  const streaming = new StreamingService(sf);
+  const streamView = new StreamView();
+
+  // Status bar indicator
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.text = '$(record) Stream Apex Logs';
+  statusBarItem.tooltip = 'Click to start streaming Apex logs from Salesforce';
+  statusBarItem.command = 'apexLogAnalyzer.startStream';
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
+  streaming.onStatus((running, message) => {
+    if (running) {
+      statusBarItem.text = `$(record) ${message || 'Streaming'}`;
+      statusBarItem.tooltip = 'Click to stop streaming';
+      statusBarItem.command = 'apexLogAnalyzer.stopStream';
+      statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    } else {
+      statusBarItem.text = '$(record) Stream Apex Logs';
+      statusBarItem.tooltip = 'Click to start streaming Apex logs from Salesforce';
+      statusBarItem.command = 'apexLogAnalyzer.startStream';
+      statusBarItem.backgroundColor = undefined;
+    }
+    streamView.setStatus(running, message);
+  });
+
+  streaming.onLog((event) => {
+    streamView.addLog(event.log);
+  });
+
+  streamView.onPicked(async (logId) => {
+    try {
+      const filePath = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Downloading log ${logId}…` },
+        async () => sf.downloadLog(logId)
+      );
+      const uri = vscode.Uri.file(filePath);
+
+      for (const tabGroup of vscode.window.tabGroups.all) {
+        for (const tab of tabGroup.tabs) {
+          const input = tab.input as { uri?: vscode.Uri } | undefined;
+          if (input?.uri?.fsPath === uri.fsPath) {
+            await vscode.window.tabGroups.close(tab);
+          }
+        }
+      }
+
+      const fs = await import('fs');
+      const freshText = fs.readFileSync(filePath, 'utf8');
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, {
+        viewColumn: vscode.ViewColumn.One, preview: false, preserveFocus: false
+      });
+      await analyzeText(context, freshText, uri, parser, analyzer, ai, sf, classResolver);
+
+      sf.fetchUserForLogId(logId).then((user) => {
+        if (!user || !currentAnalysis || !currentPanel) { return; }
+        currentAnalysis.userInfo = {
+          Name: user.Name, Username: user.Username,
+          Email: user.Email, ProfileName: user.Profile?.Name
+        };
+        currentPanel.webview.html = renderAnalysisHtml(currentAnalysis);
+      }).catch(() => { /* silent */ });
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to open log: ${e.message}`);
+    }
+  });
+
+  streamView.onStopRequested(() => {
+    streaming.stop();
+  });
+
+  context.subscriptions.push({ dispose: () => streaming.dispose() });
 
   context.subscriptions.push(
     vscode.commands.registerCommand('apexLogAnalyzer.setApiKey', () => ai.setApiKey()),
@@ -26,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
     const text = editor.document.getText(editor.selection.isEmpty ? undefined : editor.selection);
     if (!text.trim()) { vscode.window.showErrorMessage('The file (or selection) is empty.'); return; }
 
-    await analyzeText(context, text, editor.document.uri, parser, analyzer, ai);
+    await analyzeText(context, text, editor.document.uri, parser, analyzer, ai, sf, classResolver);
   });
 
   const fetchLogCmd = vscode.commands.registerCommand('apexLogAnalyzer.fetchLog', async () => {
@@ -42,7 +119,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const picked = await showLogPicker(logs);
-      if (!picked) {return;}
+      if (!picked) { return; }
 
       const filePath = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `Downloading log ${picked.Id}…` },
@@ -51,7 +128,6 @@ export function activate(context: vscode.ExtensionContext) {
 
       const uri = vscode.Uri.file(filePath);
 
-      // Close any already-open tab for this file to avoid stale cached docs
       for (const tabGroup of vscode.window.tabGroups.all) {
         for (const tab of tabGroup.tabs) {
           const input = tab.input as { uri?: vscode.Uri } | undefined;
@@ -71,12 +147,10 @@ export function activate(context: vscode.ExtensionContext) {
         preserveFocus: false
       });
 
-      // Analyse first so the panel renders, then fetch user info and update
-      await analyzeText(context, freshText, uri, parser, analyzer, ai);
+      await analyzeText(context, freshText, uri, parser, analyzer, ai, sf, classResolver);
 
-      // Auto-fetch user info in the background (don't block the UI)
       sf.fetchUserForLogId(picked.Id).then((user) => {
-        if (!user || !currentAnalysis || !currentPanel) {return;}
+        if (!user || !currentAnalysis || !currentPanel) { return; }
         currentAnalysis.userInfo = {
           Name: user.Name,
           Username: user.Username,
@@ -84,14 +158,11 @@ export function activate(context: vscode.ExtensionContext) {
           ProfileName: user.Profile?.Name
         };
         currentPanel.webview.html = renderAnalysisHtml(currentAnalysis);
-      }).catch(() => {
-        // silent — user info is a nice-to-have, not critical
-      });
+      }).catch(() => { /* silent */ });
     } catch (e: any) {
       vscode.window.showErrorMessage(`Fetch failed: ${e.message}`);
     }
   });
-
 
   const exportCmd = vscode.commands.registerCommand('apexLogAnalyzer.exportMarkdown', async () => {
     if (!currentAnalysis) {
@@ -103,7 +174,17 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage('Analysis copied to clipboard as Markdown.');
   });
 
-  context.subscriptions.push(analyzeCmd, fetchLogCmd, exportCmd);
+  const startStreamCmd = vscode.commands.registerCommand('apexLogAnalyzer.startStream', async () => {
+    streamView.show(context);
+    await streaming.start();
+  });
+
+  const stopStreamCmd = vscode.commands.registerCommand('apexLogAnalyzer.stopStream', () => {
+    streaming.stop();
+    vscode.window.showInformationMessage('Log streaming stopped.');
+  });
+
+  context.subscriptions.push(analyzeCmd, fetchLogCmd, exportCmd, startStreamCmd, stopStreamCmd);
 }
 
 async function showLogPicker(logs: ApexLogRecord[]): Promise<ApexLogRecord | undefined> {
@@ -127,7 +208,9 @@ async function analyzeText(
   uri: vscode.Uri,
   parser: ApexLogParser,
   analyzer: ApexLogAnalyzer,
-  ai: AiService
+  ai: AiService,
+  sf: SalesforceService,
+  classResolver: ApexClassResolver
 ) {
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Analysing Apex log…' },
@@ -135,20 +218,24 @@ async function analyzeText(
       const parsed = parser.parse(text);
       const analysis = analyzer.analyze(parsed);
 
-      // If switching to a different log, dispose the old panel so we get fresh state
       if (currentPanel && currentLogUri?.fsPath !== uri.fsPath) {
         currentPanel.dispose();
-        // disposal handler will clear currentPanel / currentAnalysis
       }
 
       currentAnalysis = analysis;
       currentLogUri = uri;
-      openAnalysisPanel(context, analysis, ai);
+      openAnalysisPanel(context, analysis, ai, sf, classResolver);
     }
   );
 }
 
-function openAnalysisPanel(context: vscode.ExtensionContext, analysis: Analysis, ai: AiService) {
+function openAnalysisPanel(
+  context: vscode.ExtensionContext,
+  analysis: Analysis,
+  ai: AiService,
+  sf: SalesforceService,
+  classResolver: ApexClassResolver
+) {
   if (currentPanel) {
     currentPanel.webview.html = renderAnalysisHtml(analysis);
     currentPanel.reveal(vscode.ViewColumn.Beside);
@@ -166,7 +253,7 @@ function openAnalysisPanel(context: vscode.ExtensionContext, analysis: Analysis,
 
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg.command === 'explainAll') {
-      if (!currentAnalysis) {return;}
+      if (!currentAnalysis) { return; }
       await ai.streamExplanation(
         currentAnalysis,
         undefined,
@@ -175,9 +262,9 @@ function openAnalysisPanel(context: vscode.ExtensionContext, analysis: Analysis,
         (err) => panel.webview.postMessage({ command: 'aiError', error: err })
       );
     } else if (msg.command === 'explainIssue') {
-      if (!currentAnalysis) {return;}
+      if (!currentAnalysis) { return; }
       const issue = currentAnalysis.issues[msg.index];
-      if (!issue) {return;}
+      if (!issue) { return; }
       await ai.streamExplanation(
         currentAnalysis,
         issue,
@@ -187,8 +274,10 @@ function openAnalysisPanel(context: vscode.ExtensionContext, analysis: Analysis,
       );
     } else if (msg.command === 'jumpToLine') {
       await jumpToLogLine(msg.line);
+    } else if (msg.command === 'openClass') {
+      await handleOpenClass(msg.className, msg.line, classResolver, sf);
     } else if (msg.command === 'exportMarkdown') {
-      if (!currentAnalysis) {return;}
+      if (!currentAnalysis) { return; }
       const md = buildMarkdownReport(currentAnalysis, msg.aiText || '');
       await vscode.env.clipboard.writeText(md);
       vscode.window.showInformationMessage('Analysis copied to clipboard as Markdown.');
@@ -202,14 +291,58 @@ function openAnalysisPanel(context: vscode.ExtensionContext, analysis: Analysis,
   });
 }
 
-/** Reveal a given 1-based line number in the current log document. */
+async function handleOpenClass(
+  className: string,
+  line: number | undefined,
+  classResolver: ApexClassResolver,
+  sf: SalesforceService
+) {
+  if (!classResolver.isSfdxProject()) {
+    vscode.window.showWarningMessage(
+      `Open an SFDX project folder (with sfdx-project.json) to jump to Apex class source files.`
+    );
+    return;
+  }
+
+  const loc = await classResolver.resolve(className);
+  if (loc) {
+    await classResolver.open(loc, line);
+    return;
+  }
+
+  const choice = await vscode.window.showInformationMessage(
+    `Class "${className}" not found in your workspace. Retrieve it from Salesforce?`,
+    'Retrieve from org',
+    'Cancel'
+  );
+  if (choice !== 'Retrieve from org') { return; }
+
+  try {
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Retrieving ${className} from Salesforce…` },
+      async () => {
+        await sf.retrieveClass(className);
+        classResolver.clearCache();
+      }
+    );
+    const retrieved = await classResolver.resolve(className);
+    if (retrieved) {
+      await classResolver.open(retrieved, line);
+    } else {
+      vscode.window.showWarningMessage(
+        `${className} was retrieved but could not be located. It may exist under a different package directory.`
+      );
+    }
+  } catch (e: any) {
+    vscode.window.showErrorMessage(`Retrieve failed: ${e.message}`);
+  }
+}
+
 async function jumpToLogLine(line: number) {
-  if (!currentLogUri) {return;}
+  if (!currentLogUri) { return; }
   try {
     const doc = await vscode.workspace.openTextDocument(currentLogUri);
     const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-    // Line numbers in Apex logs refer to Apex class line numbers, not log-file lines.
-    // Best effort: search the log for "|[<line>]|" and reveal that line in the log file.
     const marker = `|[${line}]|`;
     const text = doc.getText();
     const idx = text.indexOf(marker);
@@ -255,7 +388,7 @@ function buildMarkdownReport(a: Analysis, aiText: string): string {
       lines.push('```');
       lines.push(i.message);
       lines.push('```');
-      if (i.context) {lines.push(`> ${i.context}`);}
+      if (i.context) { lines.push(`> ${i.context}`); }
       lines.push('');
     }
   }

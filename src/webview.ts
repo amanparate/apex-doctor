@@ -1,5 +1,28 @@
 import { Analysis } from './analyzer';
 import { renderAreaChartHtml } from './areaChart';
+import { Insight } from './insights';
+
+
+function renderInsightsHtml(insights: Insight[]): string {
+  if (!insights.length) {return '';}
+  return `<div class="insights">
+    ${insights.map(i => `
+      <div class="insight insight-${i.severity}">
+        <div class="insight-icon">${i.icon}</div>
+        <div class="insight-body">
+          <div class="insight-title">${escapeHtml(i.title)}</div>
+          <div class="insight-detail">${escapeHtml(i.detail)}</div>
+          ${i.metric ? `<div class="insight-metric">${escapeHtml(i.metric)}</div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  </div>`;
+}
+
+function escapeHtml(s: string): string {
+  return (s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
 
 export function renderAnalysisHtml(a: Analysis): string {
   const fmt = (n?: number) => (n ?? 0).toFixed(2);
@@ -43,9 +66,17 @@ export function renderAnalysisHtml(a: Analysis): string {
         ${a.dml.map((d, i) => `<tr><td>${i + 1}</td><td>${esc(d.operation)}</td><td>${d.rows ?? '-'}</td><td>${fmt(d.durationMs)} ms</td><td>${lineLink(d.lineNumber)}</td></tr>`).join('')}
       </table>` : `<p class="muted">No DML executed.</p>`;
 
+  const classLink = (name: string, line?: number) => {
+    // Extract leading segment matching a class identifier
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\./.exec(name);
+    if (!match) {return `<code>${esc(name)}</code>`;}
+    const className = match[1];
+    return `<a href="#" class="class-link" data-class="${esc(className)}" data-line="${line ?? ''}"><code>${esc(name)}</code></a>`;
+  };
+
   const methodsHtml = a.methods.length
     ? `<table><tr><th>Method</th><th>Duration</th><th>Line</th></tr>
-        ${a.methods.map(m => `<tr><td><code>${esc(m.name)}</code></td><td>${fmt(m.durationMs)} ms</td><td>${lineLink(m.lineNumber)}</td></tr>`).join('')}
+        ${a.methods.map(m => `<tr><td>${classLink(m.name, m.lineNumber)}</td><td>${fmt(m.durationMs)} ms</td><td>${lineLink(m.lineNumber)}</td></tr>`).join('')}
       </table>` : `<p class="muted">No method timing data.</p>`;
 
   const debugsHtml = a.debugs.length
@@ -63,8 +94,20 @@ export function renderAnalysisHtml(a: Analysis): string {
 
   const flameHtml = renderAreaChartHtml(a.flameRoot);
 
-  return `<!DOCTYPE html>
+return `<!DOCTYPE html>
   <html><head><meta charset="utf-8"><style>
+    .insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; margin-top: 8px; }
+    .insight { display: flex; gap: 12px; background: var(--vscode-editorWidget-background); padding: 12px 14px; border-radius: 6px; border-left: 4px solid; }
+    .insight-good { border-color: #22c55e; }
+    .insight-info { border-color: #3b82f6; }
+    .insight-warning { border-color: #f59e0b; }
+    .insight-critical { border-color: #ef4444; }
+    .insight-icon { font-size: 20px; line-height: 1; padding-top: 2px; }
+    .insight-title { font-weight: 600; margin-bottom: 2px; }
+    .insight-detail { font-size: 12px; opacity: 0.85; line-height: 1.4; }
+    .insight-metric { margin-top: 6px; font-size: 11px; opacity: 0.7; font-family: var(--vscode-editor-font-family); }
+    .class-link { color: inherit; text-decoration: none; cursor: pointer; border-bottom: 1px dashed var(--vscode-textLink-foreground); }
+    .class-link:hover { background: var(--vscode-editor-hoverHighlightBackground); }
     body { font-family: -apple-system, Segoe UI, sans-serif; padding: 16px; color: var(--vscode-foreground); background: var(--vscode-editor-background); }
     h1 { margin: 0 0 4px; }
     h2 { border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px; margin-top: 28px; }
@@ -127,6 +170,10 @@ export function renderAnalysisHtml(a: Analysis): string {
       <button onclick="explainAll()" id="btn-explain-all">🤖 Explain root cause with AI</button>
       <button onclick="exportMarkdown()">📋 Copy as Markdown</button>
     </div>
+    ${a.insights.length ? `
+      <h2>💡 Performance Insights</h2>
+      ${renderInsightsHtml(a.insights)}
+    ` : ''}
 
     <div class="ai-panel" id="ai-panel" style="display:none">
       <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>

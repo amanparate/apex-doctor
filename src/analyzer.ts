@@ -43,6 +43,7 @@ export interface Analysis {
   codeUnits: { name: string; durationMs: number; timestamp: string }[];
   userInfo?: { Name: string; Username: string; Email: string; ProfileName?: string };
   flameRoot: FlameNode;
+  insights: import('./insights').Insight[];
 }
 
 export class ApexLogAnalyzer {
@@ -315,7 +316,10 @@ export class ApexLogAnalyzer {
       flameRoot.durationMs = (flameRoot.endNs - flameRoot.startNs) / 1e6;
     }
 
-    return {
+    const sortedIssues = issues.sort((a, b) => this.sev(a.severity) - this.sev(b.severity));
+    const sortedMethods = methods.sort((a, b) => b.durationMs - a.durationMs).slice(0, 50);
+
+    const preliminary: Analysis = {
       summary: {
         apiVersion: parsed.apiVersion,
         totalEvents: parsed.events.length,
@@ -324,15 +328,23 @@ export class ApexLogAnalyzer {
         executionEnd: execEnd?.timestamp,
         logLevels: parsed.logLevels
       },
-      issues: issues.sort((a, b) => this.sev(a.severity) - this.sev(b.severity)),
+      issues: sortedIssues,
       soql,
       dml,
-      methods: methods.sort((a, b) => b.durationMs - a.durationMs).slice(0, 50),
+      methods: sortedMethods,
       debugs,
       limits,
       codeUnits,
-      flameRoot
+      flameRoot,
+      insights: []
     };
+
+    // Compute insights from the preliminary analysis, then populate
+     
+    const { generateInsights } = require('./insights');
+    preliminary.insights = generateInsights(preliminary);
+
+    return preliminary;
   }
 
   private sev(s: Issue['severity']): number {

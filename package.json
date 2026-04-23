@@ -15,6 +15,8 @@
       { "command": "apexLogAnalyzer.fetchLog", "title": "Fetch Log from Salesforce", "category": "Apex Log Analyzer" },
       { "command": "apexLogAnalyzer.exportMarkdown", "title": "Export Analysis as Markdown", "category": "Apex Log Analyzer" },
       { "command": "apexLogAnalyzer.setApiKey", "title": "Set LLM API Key", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.startStream", "title": "Start Log Streaming", "category": "Apex Log Analyzer" },
+      { "command": "apexLogAnalyzer.stopStream", "title": "Stop Log Streaming", "category": "Apex Log Analyzer" },
       { "command": "apexLogAnalyzer.clearApiKey", "title": "Clear LLM API Key", "category": "Apex Log Analyzer" }
     ],
     "menus": {
@@ -26,7 +28,9 @@
         { "command": "apexLogAnalyzer.fetchLog" },
         { "command": "apexLogAnalyzer.exportMarkdown" },
         { "command": "apexLogAnalyzer.setApiKey" },
-        { "command": "apexLogAnalyzer.clearApiKey" }
+        { "command": "apexLogAnalyzer.clearApiKey" },
+        { "command": "apexLogAnalyzer.startStream" },
+        { "command": "apexLogAnalyzer.stopStream" }
       ]
     },
     "configuration": {
@@ -57,7 +61,12 @@
           "type": "number",
           "default": 1000,
           "description": "Flag a SOQL query as 'large' when it returns at least this many rows."
-        }
+        },
+        "apexLogAnalyzer.streamDebugLevel": {
+        "type": "string",
+        "default": "",
+        "description": "Optional debug level to pass to 'sf apex tail log --debug-level'. Leave empty to stream with default trace flag."
+      }
       }
     }
   },

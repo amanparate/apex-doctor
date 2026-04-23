@@ -96,4 +96,15 @@ export class SalesforceService {
     const match = /07L[a-zA-Z0-9]{12,15}/.exec(base);
     return match?.[0];
   }
+  /** Retrieve an Apex class from the org into the local SFDX project. */
+  async retrieveClass(className: string, targetOrg?: string): Promise<void> {
+    const org = targetOrg || (await this.getDefaultOrg());
+    if (!org) {throw new Error('No default Salesforce org found. Run: sf org login web');}
+
+    // sf project retrieve start --metadata ApexClass:ClassName
+    await execAsync(
+      `sf project retrieve start --metadata ApexClass:${className} --target-org ${org} --json`,
+      { maxBuffer: 10 * 1024 * 1024 }
+    );
+  }
 }
