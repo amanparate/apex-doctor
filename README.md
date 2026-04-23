@@ -22,10 +22,9 @@ Press **F5** in VS Code to launch the Extension Development Host.
 
 ## Using the AI feature
 
-1. Get an API key at [console.anthropic.com](https://console.anthropic.com)
-2. Run **"Apex Log Analyzer: Set Anthropic API Key"** from the Command Palette, OR just click the AI button and you'll be prompted
-3. Key is stored in VS Code's encrypted `SecretStorage` — never in settings or source
-4. Clear it any time with **"Apex Log Analyzer: Clear Anthropic API Key"**
+1. Get a FREE OpenRouter API key at openrouter.ai/keys (no credit card needed)
+2. Or use Anthropic directly by changing `apexLogAnalyzer.provider` to `anthropic`
+3. Run "Apex Log Analyzer: Set LLM API Key" from the Command Palette...
 
 ### Privacy note
 
