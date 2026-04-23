@@ -1,100 +1,136 @@
-import { Analysis } from './analyzer';
-import { renderAreaChartHtml } from './areaChart';
-import { Insight } from './insights';
-
+import { Analysis } from "./analyzer";
+import { renderAreaChartHtml } from "./areaChart";
+import { Insight } from "./insights";
 
 function renderInsightsHtml(insights: Insight[]): string {
-  if (!insights.length) {return '';}
+  if (!insights.length) {
+    return "";
+  }
   return `<div class="insights">
-    ${insights.map(i => `
+    ${insights
+      .map(
+        (i) => `
       <div class="insight insight-${i.severity}">
         <div class="insight-icon">${i.icon}</div>
         <div class="insight-body">
           <div class="insight-title">${escapeHtml(i.title)}</div>
           <div class="insight-detail">${escapeHtml(i.detail)}</div>
-          ${i.metric ? `<div class="insight-metric">${escapeHtml(i.metric)}</div>` : ''}
+          ${i.metric ? `<div class="insight-metric">${escapeHtml(i.metric)}</div>` : ""}
         </div>
       </div>
-    `).join('')}
+    `,
+      )
+      .join("")}
   </div>`;
 }
 
 function escapeHtml(s: string): string {
-  return (s ?? '').replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  return (s ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ]!,
+  );
 }
 
 export function renderAnalysisHtml(a: Analysis): string {
   const fmt = (n?: number) => (n ?? 0).toFixed(2);
   const esc = (s: string) =>
-    (s ?? '').replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!)
+    (s ?? "").replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c]!,
     );
 
   const issuesHtml = a.issues.length
-    ? a.issues.map((i, idx) => `
+    ? a.issues
+        .map(
+          (i, idx) => `
       <div class="issue ${i.severity}">
         <div class="row">
           <span class="badge ${i.severity}">${i.severity.toUpperCase()}</span>
           <strong>${esc(i.type)}</strong>
-          ${i.lineNumber ? `<a href="#" class="line-link" data-line="${i.lineNumber}">line ${i.lineNumber}</a>` : ''}
+          ${i.lineNumber ? `<a href="#" class="line-link" data-line="${i.lineNumber}">line ${i.lineNumber}</a>` : ""}
           <span class="muted">@ ${esc(i.timestamp)}</span>
           <button class="mini" onclick="explainIssue(${idx})">🤖 Explain this</button>
         </div>
         <pre>${esc(i.message)}</pre>
-        ${i.context ? `<p class="context">💡 ${esc(i.context)}</p>` : ''}
-      </div>`).join('')
+        ${i.context ? `<p class="context">💡 ${esc(i.context)}</p>` : ""}
+      </div>`,
+        )
+        .join("")
     : `<p class="muted">No issues detected. 🎉</p>`;
 
   const userInfoHtml = a.userInfo
     ? `<div class="card user-card">
          <div class="l">Executed by</div>
          <div class="v">${esc(a.userInfo.Name)}</div>
-         <div class="muted">${esc(a.userInfo.Username)} · ${esc(a.userInfo.Email)}${a.userInfo.ProfileName ? ' · ' + esc(a.userInfo.ProfileName) : ''}</div>
-       </div>` : '';
+         <div class="muted">${esc(a.userInfo.Username)} · ${esc(a.userInfo.Email)}${a.userInfo.ProfileName ? " · " + esc(a.userInfo.ProfileName) : ""}</div>
+       </div>`
+    : "";
 
   const lineLink = (line?: number) =>
-    line ? `<a href="#" class="line-link" data-line="${line}">${line}</a>` : '-';
+    line
+      ? `<a href="#" class="line-link" data-line="${line}">${line}</a>`
+      : "-";
 
   const soqlHtml = a.soql.length
     ? `<table><tr><th>#</th><th>Duration</th><th>Rows</th><th>Line</th><th>Query</th></tr>
-        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? '-'}</td><td>${lineLink(q.lineNumber)}</td><td><code>${esc(q.query)}</code></td></tr>`).join('')}
-      </table>` : `<p class="muted">No SOQL executed.</p>`;
+        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? "-"}</td><td>${lineLink(q.lineNumber)}</td><td><code>${esc(q.query)}</code></td></tr>`).join("")}
+      </table>`
+    : `<p class="muted">No SOQL executed.</p>`;
 
   const dmlHtml = a.dml.length
     ? `<table><tr><th>#</th><th>Op</th><th>Rows</th><th>Duration</th><th>Line</th></tr>
-        ${a.dml.map((d, i) => `<tr><td>${i + 1}</td><td>${esc(d.operation)}</td><td>${d.rows ?? '-'}</td><td>${fmt(d.durationMs)} ms</td><td>${lineLink(d.lineNumber)}</td></tr>`).join('')}
-      </table>` : `<p class="muted">No DML executed.</p>`;
+        ${a.dml.map((d, i) => `<tr><td>${i + 1}</td><td>${esc(d.operation)}</td><td>${d.rows ?? "-"}</td><td>${fmt(d.durationMs)} ms</td><td>${lineLink(d.lineNumber)}</td></tr>`).join("")}
+      </table>`
+    : `<p class="muted">No DML executed.</p>`;
 
   const classLink = (name: string, line?: number) => {
     // Extract leading segment matching a class identifier
     const match = /^([A-Za-z_][A-Za-z0-9_]*)\./.exec(name);
-    if (!match) {return `<code>${esc(name)}</code>`;}
+    if (!match) {
+      return `<code>${esc(name)}</code>`;
+    }
     const className = match[1];
-    return `<a href="#" class="class-link" data-class="${esc(className)}" data-line="${line ?? ''}"><code>${esc(name)}</code></a>`;
+    return `<a href="#" class="class-link" data-class="${esc(className)}" data-line="${line ?? ""}"><code>${esc(name)}</code></a>`;
   };
 
   const methodsHtml = a.methods.length
     ? `<table><tr><th>Method</th><th>Duration</th><th>Line</th></tr>
-        ${a.methods.map(m => `<tr><td>${classLink(m.name, m.lineNumber)}</td><td>${fmt(m.durationMs)} ms</td><td>${lineLink(m.lineNumber)}</td></tr>`).join('')}
-      </table>` : `<p class="muted">No method timing data.</p>`;
+        ${a.methods.map((m) => `<tr><td>${classLink(m.name, m.lineNumber)}</td><td>${fmt(m.durationMs)} ms</td><td>${lineLink(m.lineNumber)}</td></tr>`).join("")}
+      </table>`
+    : `<p class="muted">No method timing data.</p>`;
 
   const debugsHtml = a.debugs.length
-    ? a.debugs.map(d => `<div class="debug"><span class="muted">${esc(d.timestamp)} · line ${lineLink(d.lineNumber)} · [${esc(d.level)}]</span><pre>${esc(d.message)}</pre></div>`).join('')
+    ? a.debugs
+        .map(
+          (d) =>
+            `<div class="debug"><span class="muted">${esc(d.timestamp)} · line ${lineLink(d.lineNumber)} · [${esc(d.level)}]</span><pre>${esc(d.message)}</pre></div>`,
+        )
+        .join("")
     : `<p class="muted">No debug statements.</p>`;
 
   const codeUnitsHtml = a.codeUnits.length
     ? `<table><tr><th>Code Unit</th><th>Duration</th></tr>
-        ${a.codeUnits.map(c => `<tr><td><code>${esc(c.name)}</code></td><td>${fmt(c.durationMs)} ms</td></tr>`).join('')}
-      </table>` : `<p class="muted">No code units captured.</p>`;
+        ${a.codeUnits.map((c) => `<tr><td><code>${esc(c.name)}</code></td><td>${fmt(c.durationMs)} ms</td></tr>`).join("")}
+      </table>`
+    : `<p class="muted">No code units captured.</p>`;
 
   const limitsHtml = a.limits.length
-    ? a.limits.map(l => `<pre>${esc(l)}</pre>`).join('')
+    ? a.limits.map((l) => `<pre>${esc(l)}</pre>`).join("")
     : `<p class="muted">No limit usage block found.</p>`;
 
   const flameHtml = renderAreaChartHtml(a.flameRoot);
 
-return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
   <html><head><meta charset="utf-8"><style>
     .insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; margin-top: 8px; }
     .insight { display: flex; gap: 12px; background: var(--vscode-editorWidget-background); padding: 12px 14px; border-radius: 6px; border-left: 4px solid; }
@@ -152,7 +188,7 @@ return `<!DOCTYPE html>
     #followup-placeholder { margin-top: 12px; padding: 10px; background: var(--vscode-editorWidget-background); border: 1px dashed var(--vscode-panel-border); border-radius: 4px; font-size: 12px; opacity: 0.7; }
   </style></head>
   <body>
-    <h1>Apex Log Analyzer by Aman</h1>
+    <h1>Apex Doctor</h1>
     <p class="tagline">API ${esc(a.summary.apiVersion)} · ${a.summary.totalEvents} events · ${fmt(a.summary.totalDurationMs)} ms total</p>
 
     ${userInfoHtml}
@@ -161,8 +197,8 @@ return `<!DOCTYPE html>
       <div class="card"><div class="l">Total Duration</div><div class="v">${fmt(a.summary.totalDurationMs)} ms</div></div>
       <div class="card"><div class="l">SOQL Queries</div><div class="v">${a.soql.length}</div></div>
       <div class="card"><div class="l">DML Operations</div><div class="v">${a.dml.length}</div></div>
-      <div class="card"><div class="l">Errors</div><div class="v">${a.issues.filter(i => i.severity === 'fatal' || i.severity === 'error').length}</div></div>
-      <div class="card"><div class="l">Warnings</div><div class="v">${a.issues.filter(i => i.severity === 'warning').length}</div></div>
+      <div class="card"><div class="l">Errors</div><div class="v">${a.issues.filter((i) => i.severity === "fatal" || i.severity === "error").length}</div></div>
+      <div class="card"><div class="l">Warnings</div><div class="v">${a.issues.filter((i) => i.severity === "warning").length}</div></div>
       <div class="card"><div class="l">Debug Logs</div><div class="v">${a.debugs.length}</div></div>
     </div>
 
@@ -170,10 +206,14 @@ return `<!DOCTYPE html>
       <button onclick="explainAll()" id="btn-explain-all">🤖 Explain root cause with AI</button>
       <button onclick="exportMarkdown()">📋 Copy as Markdown</button>
     </div>
-    ${a.insights.length ? `
+    ${
+      a.insights.length
+        ? `
       <h2>💡 Performance Insights</h2>
       ${renderInsightsHtml(a.insights)}
-    ` : ''}
+    `
+        : ""
+    }
 
     <div class="ai-panel" id="ai-panel" style="display:none">
       <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>

@@ -46,7 +46,7 @@ export interface Analysis {
   insights: import('./insights').Insight[];
 }
 
-export class ApexLogAnalyzer {
+export class apexDoctor {
   analyze(parsed: ParsedLog): Analysis {
     const issues: Issue[] = [];
     const soql: SoqlEntry[] = [];
@@ -232,7 +232,7 @@ export class ApexLogAnalyzer {
     }
 
     // Read thresholds from user settings
-    const config = vscode.workspace.getConfiguration('apexLogAnalyzer');
+    const config = vscode.workspace.getConfiguration('apexDoctor');
     const largeQueryThreshold = config.get<number>('largeQueryThreshold') ?? 1000;
     const soqlInLoopThreshold = config.get<number>('soqlInLoopThreshold') ?? 5;
 

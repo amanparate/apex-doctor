@@ -1,14 +1,44 @@
+# Source & config
+src/**
+out/**
 .vscode/**
 .vscode-test/**
-out/**
+.github/**
 node_modules/**
-src/**
-.gitignore
-.yarnrc
+tsconfig.json
 esbuild.js
-vsc-extension-quickstart.md
-**/tsconfig.json
-**/eslint.config.mjs
-**/*.map
+.eslintrc.json
+eslint.config.*
+.gitignore
+.gitattributes
+.editorconfig
+
+# Dev files
 **/*.ts
-**/.vscode-test.*
+**/*.map
+**/tsconfig.json
+**/.eslintrc.json
+
+# Tests
+**/*.test.js
+**/*.test.ts
+**/test/**
+
+# Docs screenshots (optional — exclude if you want a smaller package)
+# docs/**
+
+# OS junk
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.vsix
+
+# Keep these
+!dist/**
+!images/**
+!LICENSE
+!README.md
+!CHANGELOG.md
+!package.json

@@ -59,7 +59,7 @@ export class StreamingService {
       return;
     }
 
-    const config = vscode.workspace.getConfiguration('apexLogAnalyzer');
+    const config = vscode.workspace.getConfiguration('apexDoctor');
     const debugLevel = (config.get<string>('streamDebugLevel') || '').trim();
 
     this.seenIds.clear();

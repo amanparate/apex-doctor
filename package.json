@@ -1,74 +1,103 @@
 {
-  "name": "apex-log-analyzer-by-aman",
-  "displayName": "Apex Log Analyzer by Aman",
-  "description": "Analyse Salesforce Apex debug logs with AI-assisted root-cause explanations, flame graphs, and SOQL-in-loop detection",
-  "version": "0.2.0",
-  "publisher": "aman",
+  "name": "apex-doctor",
+  "displayName": "Apex Doctor",
+  "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
+  "version": "0.3.0",
+  "publisher": "amanparate",
+  "author": {
+    "name": "Aman Parate",
+    "url": "https://github.com/amanparate"
+  },
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amanparate/apex-doctor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amanparate/apex-doctor/issues"
+  },
+  "homepage": "https://github.com/amanparate/apex-doctor#readme",
+  "galleryBanner": {
+    "color": "#032E61",
+    "theme": "dark"
+  },
   "engines": { "vscode": "^1.116.0" },
-  "categories": ["Other", "Debuggers"],
-  "keywords": ["salesforce", "apex", "log", "debug", "analyzer", "ai", "flame graph"],
+  "categories": ["Other", "Debuggers", "Visualization"],
+  "keywords": [
+    "salesforce",
+    "apex",
+    "sfdx",
+    "debug log",
+    "log analyzer",
+    "ai",
+    "claude",
+    "openrouter",
+    "performance",
+    "soql"
+  ],
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "apexLogAnalyzer.analyze", "title": "Analyse this Apex Log", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.fetchLog", "title": "Fetch Log from Salesforce", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.exportMarkdown", "title": "Export Analysis as Markdown", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.setApiKey", "title": "Set LLM API Key", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.startStream", "title": "Start Log Streaming", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.stopStream", "title": "Stop Log Streaming", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.compareLogs", "title": "Compare Two Apex Logs", "category": "Apex Log Analyzer" },
-      { "command": "apexLogAnalyzer.clearApiKey", "title": "Clear LLM API Key", "category": "Apex Log Analyzer" }
+      { "command": "apexDoctor.analyze", "title": "Analyse this Apex Log", "category": "Apex Doctor" },
+      { "command": "apexDoctor.fetchLog", "title": "Fetch Log from Salesforce", "category": "Apex Doctor" },
+      { "command": "apexDoctor.exportMarkdown", "title": "Export Analysis as Markdown", "category": "Apex Doctor" },
+      { "command": "apexDoctor.setApiKey", "title": "Set LLM API Key", "category": "Apex Doctor" },
+      { "command": "apexDoctor.startStream", "title": "Start Log Streaming", "category": "Apex Doctor" },
+      { "command": "apexDoctor.stopStream", "title": "Stop Log Streaming", "category": "Apex Doctor" },
+      { "command": "apexDoctor.compareLogs", "title": "Compare Two Apex Logs", "category": "Apex Doctor" },
+      { "command": "apexDoctor.clearApiKey", "title": "Clear LLM API Key", "category": "Apex Doctor" }
     ],
     "menus": {
       "editor/context": [
-        { "command": "apexLogAnalyzer.analyze", "group": "1_apexLogAnalyzer@1" }
+        { "command": "apexDoctor.analyze", "group": "1_apexDoctor@1" }
       ],
       "commandPalette": [
-        { "command": "apexLogAnalyzer.analyze" },
-        { "command": "apexLogAnalyzer.fetchLog" },
-        { "command": "apexLogAnalyzer.exportMarkdown" },
-        { "command": "apexLogAnalyzer.setApiKey" },
-        { "command": "apexLogAnalyzer.clearApiKey" },
-        { "command": "apexLogAnalyzer.startStream" },
-        { "command": "apexLogAnalyzer.stopStream" },
-        { "command": "apexLogAnalyzer.compareLogs" }
+        { "command": "apexDoctor.analyze" },
+        { "command": "apexDoctor.fetchLog" },
+        { "command": "apexDoctor.exportMarkdown" },
+        { "command": "apexDoctor.setApiKey" },
+        { "command": "apexDoctor.clearApiKey" },
+        { "command": "apexDoctor.startStream" },
+        { "command": "apexDoctor.stopStream" },
+        { "command": "apexDoctor.compareLogs" }
       ]
     },
     "configuration": {
-      "title": "Apex Log Analyzer by Aman",
+      "title": "Apex Doctor",
       "properties": {
-        "apexLogAnalyzer.provider": {
+        "apexDoctor.provider": {
           "type": "string",
           "enum": ["openrouter", "anthropic"],
           "default": "openrouter",
           "description": "LLM provider. OpenRouter offers free models; Anthropic gives direct Claude access (paid)."
         },
-        "apexLogAnalyzer.model": {
+        "apexDoctor.model": {
           "type": "string",
           "default": "openrouter/free",
           "description": "Model name. OpenRouter: 'openrouter/free' or any ':free' model. Anthropic: 'claude-sonnet-4-5'."
         },
-        "apexLogAnalyzer.maxTokens": {
+        "apexDoctor.maxTokens": {
           "type": "number",
           "default": 1500,
           "description": "Maximum tokens for AI response."
         },
-        "apexLogAnalyzer.soqlInLoopThreshold": {
+        "apexDoctor.soqlInLoopThreshold": {
           "type": "number",
           "default": 5,
           "description": "Flag SOQL-in-loop when the same query repeats at least this many times."
         },
-        "apexLogAnalyzer.largeQueryThreshold": {
+        "apexDoctor.largeQueryThreshold": {
           "type": "number",
           "default": 1000,
           "description": "Flag a SOQL query as 'large' when it returns at least this many rows."
         },
-        "apexLogAnalyzer.streamDebugLevel": {
-        "type": "string",
-        "default": "",
-        "description": "Optional debug level to pass to 'sf apex tail log --debug-level'. Leave empty to stream with default trace flag."
-      }
+        "apexDoctor.streamDebugLevel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional debug level to pass to 'sf apex tail log --debug-level'. Leave empty to stream with default trace flag."
+        }
       }
     }
   },
