@@ -1,0 +1,109 @@
+{
+  "name": "apex-log-analyzer-by-aman",
+  "displayName": "Apex Log Analyzer by Aman",
+  "description": "Analyse Salesforce Apex debug logs with AI-assisted root-cause explanations",
+  "version": "0.1.0",
+  "publisher": "aman",
+  "engines": {
+    "vscode": "^1.116.0"
+  },
+  "categories": [
+    "Other",
+    "Debuggers"
+  ],
+  "keywords": [
+    "salesforce",
+    "apex",
+    "log",
+    "debug",
+    "analyzer",
+    "ai"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "apexLogAnalyzer.analyze",
+        "title": "Analyse this Apex Log",
+        "category": "Apex Log Analyzer"
+      },
+      {
+        "command": "apexLogAnalyzer.syncUser",
+        "title": "Sync with Salesforce Org (Fetch User Info)",
+        "category": "Apex Log Analyzer"
+      },
+      {
+        "command": "apexLogAnalyzer.setApiKey",
+        "title": "Set LLM API Key",
+        "category": "Apex Log Analyzer"
+      },
+      {
+        "command": "apexLogAnalyzer.clearApiKey",
+        "title": "Clear LLM API Key",
+        "category": "Apex Log Analyzer"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "apexLogAnalyzer.analyze",
+          "group": "1_apexLogAnalyzer@1"
+        }
+      ],
+      "commandPalette": [
+        { "command": "apexLogAnalyzer.analyze" },
+        { "command": "apexLogAnalyzer.syncUser" },
+        { "command": "apexLogAnalyzer.setApiKey" },
+        { "command": "apexLogAnalyzer.clearApiKey" }
+      ]
+    },
+    "configuration": {
+      "title": "Apex Log Analyzer by Aman",
+      "properties": {
+        "apexLogAnalyzer.provider": {
+          "type": "string",
+          "enum": ["openrouter", "anthropic"],
+          "default": "openrouter",
+          "description": "LLM provider. OpenRouter offers free models; Anthropic gives direct Claude access (paid)."
+        },
+        "apexLogAnalyzer.model": {
+          "type": "string",
+          "default": "google/gemini-2.0-flash-exp:free",
+          "description": "Model name. For OpenRouter: 'google/gemini-2.0-flash-exp:free' or 'meta-llama/llama-3.3-70b-instruct:free'. For Anthropic: 'claude-sonnet-4-5'."
+        },
+        "apexLogAnalyzer.maxTokens": {
+          "type": "number",
+          "default": 1500,
+          "description": "Maximum tokens for AI response."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.116.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.56.1",
+    "eslint": "^9.39.3",
+    "esbuild": "^0.27.3",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
