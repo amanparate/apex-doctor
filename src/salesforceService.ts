@@ -1,7 +1,7 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as path from "path";
-import * as fs from "fs";
+import * as fsPromises from "fs/promises";
 import * as os from "os";
 
 const execAsync = promisify(exec);
@@ -268,9 +268,9 @@ export class SalesforceService {
 
     // Persist to an OS temp file named with the log ID so filename-extraction picks it up
     const tmpDir = path.join(os.tmpdir(), "apex-log-analyzer-by-aman");
-    fs.mkdirSync(tmpDir, { recursive: true });
+    await fsPromises.mkdir(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, `${logId}.log`);
-    fs.writeFileSync(filePath, stdout, "utf8");
+    await fsPromises.writeFile(filePath, stdout, "utf8");
     return filePath;
   }
 

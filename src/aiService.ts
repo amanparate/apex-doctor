@@ -51,6 +51,8 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
   },
 };
 
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
 export class AiService {
   constructor(private secrets: vscode.SecretStorage) {}
 
@@ -174,48 +176,90 @@ export class AiService {
     }
 
     if (analysis.limits.length) {
-      lines.push("## GOVERNOR LIMITS (raw)");
-      lines.push(analysis.limits[analysis.limits.length - 1].slice(0, 1500));
+      lines.push("## GOVERNOR LIMITS");
+      for (const lu of analysis.limits) {
+        lines.push(`Namespace: ${lu.namespace}`);
+        for (const m of lu.metrics) {
+          if (m.used > 0) {
+            lines.push(
+              `  ${m.name}: ${m.used} / ${m.limit} (${m.pct.toFixed(0)}%)`,
+            );
+          }
+        }
+      }
+      lines.push("");
     }
 
     return lines.join("\n");
   }
 
-  private buildPrompt(analysis: Analysis, focusIssue?: Issue): string {
-    const context = this.buildContext(analysis, focusIssue);
-    const task = focusIssue
-      ? `Explain the root cause of the specific issue flagged above, and recommend a concrete fix.`
-      : `Summarise the root cause of the failure(s) in this Apex log and recommend concrete fixes.`;
-
-    return `You are a senior Salesforce Apex developer helping debug a failing transaction. You will be given structured excerpts from a Salesforce Apex debug log.
-
-${task}
-
-Respond in this exact markdown structure:
-
-**Root Cause**
-A 2-3 sentence plain-English explanation of what actually went wrong and why.
-
-**Where it broke**
-The class/method and line number, if identifiable.
-
-**Likely Fix**
-A concrete, actionable recommendation. If code changes are needed, show a short Apex snippet (5-15 lines max).
-
-**Prevention**
-One or two practices that would prevent this class of issue recurring.
-
-Be direct. No filler, no restating what the user already sees.
+  buildSystemPrompt(analysis: Analysis): string {
+    return `You are a senior Salesforce Apex developer helping debug a failing transaction. You will be given structured excerpts from a Salesforce Apex debug log, then asked questions about it. Be direct, no filler. Use Salesforce-aware terminology (governor limits, bulkification, selective queries, etc.).
 
 ---
 LOG CONTEXT:
 
-${context}`;
+${this.buildContext(analysis)}`;
+  }
+
+  buildInitialUserPrompt(analysis: Analysis, focusIssue?: Issue): string {
+    const lines: string[] = [];
+    if (focusIssue) {
+      lines.push(
+        `Focus on this specific issue: [${focusIssue.severity.toUpperCase()}] ${focusIssue.type}${focusIssue.lineNumber ? ` at line ${focusIssue.lineNumber}` : ""}`,
+      );
+      lines.push(focusIssue.message);
+      lines.push("");
+      lines.push("Explain the root cause and recommend a concrete fix.");
+    } else {
+      lines.push(
+        `Summarise the root cause of the failure(s) in this Apex log and recommend concrete fixes.`,
+      );
+    }
+    lines.push("");
+    lines.push("Respond in this exact markdown structure:");
+    lines.push("");
+    lines.push("**Root Cause**");
+    lines.push(
+      "A 2-3 sentence plain-English explanation of what actually went wrong and why.",
+    );
+    lines.push("");
+    lines.push("**Where it broke**");
+    lines.push("The class/method and line number, if identifiable.");
+    lines.push("");
+    lines.push("**Likely Fix**");
+    lines.push(
+      "A concrete, actionable recommendation. If code changes are needed, show a short Apex snippet (5-15 lines max).",
+    );
+    lines.push("");
+    lines.push("**Prevention**");
+    lines.push(
+      "One or two practices that would prevent this class of issue recurring.",
+    );
+    void analysis;
+    return lines.join("\n");
   }
 
   async streamExplanation(
     analysis: Analysis,
     focusIssue: Issue | undefined,
+    onChunk: (text: string) => void,
+    onDone: (fullText: string) => void,
+    onError: (err: string) => void,
+  ): Promise<void> {
+    const userPrompt = this.buildInitialUserPrompt(analysis, focusIssue);
+    await this.streamChat(
+      analysis,
+      [{ role: "user", content: userPrompt }],
+      onChunk,
+      onDone,
+      onError,
+    );
+  }
+
+  async streamChat(
+    analysis: Analysis,
+    messages: ChatMessage[],
     onChunk: (text: string) => void,
     onDone: (fullText: string) => void,
     onError: (err: string) => void,
@@ -240,11 +284,11 @@ ${context}`;
 
     const model = config.get<string>("model") || PROVIDERS[provider].defaultModel;
     const maxTokens = config.get<number>("maxTokens") || 1500;
-    const prompt = this.buildPrompt(analysis, focusIssue);
+    const system = this.buildSystemPrompt(analysis);
 
     switch (provider) {
       case "anthropic":
-        return this.streamAnthropic(apiKey, model, maxTokens, prompt, onChunk, onDone, onError);
+        return this.streamAnthropic(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
       case "openrouter":
         return this.streamOpenAICompat(
           {
@@ -255,15 +299,15 @@ ${context}`;
               "X-Title": "Apex Doctor",
             },
           },
-          apiKey, model, maxTokens, prompt, onChunk, onDone, onError,
+          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
         );
       case "openai":
         return this.streamOpenAICompat(
           { host: "api.openai.com", path: "/v1/chat/completions" },
-          apiKey, model, maxTokens, prompt, onChunk, onDone, onError,
+          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
         );
       case "gemini":
-        return this.streamGemini(apiKey, model, maxTokens, prompt, onChunk, onDone, onError);
+        return this.streamGemini(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
     }
   }
 
@@ -271,7 +315,8 @@ ${context}`;
     apiKey: string,
     model: string,
     maxTokens: number,
-    prompt: string,
+    system: string,
+    messages: ChatMessage[],
     onChunk: (t: string) => void,
     onDone: (t: string) => void,
     onError: (e: string) => void,
@@ -280,7 +325,8 @@ ${context}`;
       model,
       max_tokens: maxTokens,
       stream: true,
-      messages: [{ role: "user", content: prompt }],
+      system,
+      messages,
     });
     const req = https.request(
       {
@@ -346,7 +392,8 @@ ${context}`;
     apiKey: string,
     model: string,
     maxTokens: number,
-    prompt: string,
+    system: string,
+    messages: ChatMessage[],
     onChunk: (t: string) => void,
     onDone: (t: string) => void,
     onError: (e: string) => void,
@@ -355,7 +402,7 @@ ${context}`;
       model,
       max_tokens: maxTokens,
       stream: true,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "system", content: system }, ...messages],
     });
     const req = https.request(
       {
@@ -416,13 +463,19 @@ ${context}`;
     apiKey: string,
     model: string,
     maxTokens: number,
-    prompt: string,
+    system: string,
+    messages: ChatMessage[],
     onChunk: (t: string) => void,
     onDone: (t: string) => void,
     onError: (e: string) => void,
   ) {
+    const contents = messages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
     const body = JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: system }] },
+      contents,
       generationConfig: { maxOutputTokens: maxTokens },
     });
     const req = https.request(

@@ -1,7 +1,14 @@
 import { ParsedLog, LogEvent } from './parser';
 import * as vscode from 'vscode';
-import { Insight, generateInsights } from './insights';
+import { generateInsights, Insight } from './insights';
 
+export interface StackFrame {
+  className: string;
+  methodName?: string;
+  line?: number;
+  column?: number;
+  raw: string;
+}
 
 export interface Issue {
   severity: 'fatal' | 'error' | 'warning' | 'info';
@@ -10,12 +17,34 @@ export interface Issue {
   lineNumber?: number;
   timestamp: string;
   context?: string;
+  stackFrames?: StackFrame[];
+}
+
+export interface TestResult {
+  name: string;
+  passed: boolean;
+  message?: string;
+  durationMs?: number;
+  lineNumber?: number;
+  timestamp: string;
 }
 
 export interface SoqlEntry { query: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; }
 export interface DmlEntry { operation: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; }
 export interface MethodEntry { name: string; lineNumber?: number; durationMs: number; timestamp: string; }
 export interface DebugEntry { level: string; message: string; lineNumber?: number; timestamp: string; }
+
+export interface LimitMetric {
+  name: string;
+  used: number;
+  limit: number;
+  pct: number;
+}
+
+export interface LimitUsage {
+  namespace: string;
+  metrics: LimitMetric[];
+}
 
 export interface FlameNode {
   name: string;
@@ -41,8 +70,10 @@ export interface Analysis {
   dml: DmlEntry[];
   methods: MethodEntry[];
   debugs: DebugEntry[];
-  limits: string[];
+  limits: LimitUsage[];
+  rawLimits: string[];
   codeUnits: { name: string; durationMs: number; timestamp: string }[];
+  testResults: TestResult[];
   userInfo?: { Name: string; Username: string; Email: string; ProfileName?: string };
   flameRoot: FlameNode;
   insights: Insight[];
@@ -55,8 +86,10 @@ export class ApexDoctor {
     const dml: DmlEntry[] = [];
     const methods: MethodEntry[] = [];
     const debugs: DebugEntry[] = [];
-    const limits: string[] = [];
+    const rawLimits: string[] = [];
+    const parsedLimits: LimitUsage[] = [];
     const codeUnits: { name: string; durationMs: number; timestamp: string }[] = [];
+    const testResults: TestResult[] = [];
 
     let execStart: LogEvent | undefined;
     let execEnd: LogEvent | undefined;
@@ -204,32 +237,69 @@ export class ApexDoctor {
           break;
         }
 
-        case 'EXCEPTION_THROWN':
+        case 'EXCEPTION_THROWN': {
+          const frames = parseStackTrace(ev.details);
           issues.push({
             severity: 'error',
             type: 'Exception Thrown',
-            message: ev.details,
+            message: extractExceptionMessage(ev.details),
             lineNumber: ev.lineNumber,
             timestamp: ev.timestamp,
-            context: 'An exception was thrown — check the stack trace and surrounding methods.'
+            context: 'An exception was thrown — check the stack trace and surrounding methods.',
+            stackFrames: frames.length ? frames : undefined,
           });
           break;
+        }
 
-        case 'FATAL_ERROR':
+        case 'FATAL_ERROR': {
+          const frames = parseStackTrace(ev.details);
           issues.push({
             severity: 'fatal',
             type: 'Fatal Error',
-            message: ev.details,
+            message: extractExceptionMessage(ev.details),
             lineNumber: ev.lineNumber,
             timestamp: ev.timestamp,
-            context: 'Execution was halted by this error. This is most likely the root cause.'
+            context: 'Execution was halted by this error. This is most likely the root cause.',
+            stackFrames: frames.length ? frames : undefined,
           });
           break;
+        }
+
+        case 'TEST_PASS':
+        case 'TEST_FAIL': {
+          const parts = ev.details.split('|');
+          const name = (parts[0] || '').trim() || 'Unknown';
+          const message = parts.slice(1).join('|').trim();
+          const passed = ev.eventType === 'TEST_PASS';
+          testResults.push({
+            name,
+            passed,
+            message: message || undefined,
+            lineNumber: ev.lineNumber,
+            timestamp: ev.timestamp,
+          });
+          if (!passed) {
+            issues.push({
+              severity: 'error',
+              type: 'Test Failed',
+              message: `${name}: ${message || 'assertion failed'}`,
+              lineNumber: ev.lineNumber,
+              timestamp: ev.timestamp,
+              context: 'Test assertion failed. Check the assertion message and the Apex source for the failing test.',
+            });
+          }
+          break;
+        }
 
         case 'CUMULATIVE_LIMIT_USAGE':
-        case 'LIMIT_USAGE_FOR_NS':
-          limits.push(ev.raw);
+          rawLimits.push(ev.raw);
           break;
+        case 'LIMIT_USAGE_FOR_NS': {
+          rawLimits.push(ev.raw);
+          const usage = parseLimitUsageBlock(ev.details);
+          if (usage) { parsedLimits.push(usage); }
+          break;
+        }
       }
     }
 
@@ -237,6 +307,11 @@ export class ApexDoctor {
     const config = vscode.workspace.getConfiguration('apexDoctor');
     const largeQueryThreshold = config.get<number>('largeQueryThreshold') ?? 1000;
     const soqlInLoopThreshold = config.get<number>('soqlInLoopThreshold') ?? 5;
+    const slowSoqlThresholdMs = config.get<number>('slowSoqlThresholdMs') ?? 1000;
+    const slowMethodThresholdMs = config.get<number>('slowMethodThresholdMs') ?? 0;
+    const flaggedObjects = (config.get<string[]>('flagSoqlOnObjects') ?? [])
+      .map(o => o.trim().toLowerCase())
+      .filter(o => o.length > 0);
 
     // Heuristic: large and slow queries
     for (const q of soql) {
@@ -250,7 +325,7 @@ export class ApexDoctor {
           context: `Query: ${q.query}`
         });
       }
-      if ((q.durationMs ?? 0) > 1000) {
+      if ((q.durationMs ?? 0) >= slowSoqlThresholdMs) {
         issues.push({
           severity: 'warning',
           type: 'Slow SOQL Query',
@@ -259,6 +334,38 @@ export class ApexDoctor {
           timestamp: q.timestamp,
           context: `Query: ${q.query}`
         });
+      }
+      if (flaggedObjects.length) {
+        const fromMatch = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(q.query);
+        if (fromMatch) {
+          const obj = fromMatch[1].toLowerCase();
+          if (flaggedObjects.includes(obj)) {
+            issues.push({
+              severity: 'warning',
+              type: 'Restricted Object Query',
+              message: `Query touches monitored object "${fromMatch[1]}"`,
+              lineNumber: q.lineNumber,
+              timestamp: q.timestamp,
+              context: `Configured via apexDoctor.flagSoqlOnObjects. Query: ${q.query}`,
+            });
+          }
+        }
+      }
+    }
+
+    // Heuristic: slow methods (only if user opted in)
+    if (slowMethodThresholdMs > 0) {
+      for (const m of methods) {
+        if (m.durationMs >= slowMethodThresholdMs) {
+          issues.push({
+            severity: 'warning',
+            type: 'Slow Method',
+            message: `${m.name} took ${m.durationMs.toFixed(2)} ms`,
+            lineNumber: m.lineNumber,
+            timestamp: m.timestamp,
+            context: `Threshold: ${slowMethodThresholdMs} ms (apexDoctor.slowMethodThresholdMs)`,
+          });
+        }
       }
     }
 
@@ -321,6 +428,20 @@ export class ApexDoctor {
     const sortedIssues = issues.sort((a, b) => this.sev(a.severity) - this.sev(b.severity));
     const sortedMethods = methods.sort((a, b) => b.durationMs - a.durationMs).slice(0, 50);
 
+    // De-duplicate parsed limits per namespace, keeping the most recent (highest "used") block
+    const limitsByNs = new Map<string, LimitUsage>();
+    for (const lu of parsedLimits) {
+      const existing = limitsByNs.get(lu.namespace);
+      if (!existing) {
+        limitsByNs.set(lu.namespace, lu);
+        continue;
+      }
+      const existingMax = Math.max(...existing.metrics.map(m => m.pct), 0);
+      const newMax = Math.max(...lu.metrics.map(m => m.pct), 0);
+      if (newMax >= existingMax) { limitsByNs.set(lu.namespace, lu); }
+    }
+    const limits = Array.from(limitsByNs.values());
+
     const preliminary: Analysis = {
       summary: {
         apiVersion: parsed.apiVersion,
@@ -336,13 +457,13 @@ export class ApexDoctor {
       methods: sortedMethods,
       debugs,
       limits,
+      rawLimits,
       codeUnits,
+      testResults,
       flameRoot,
       insights: []
     };
 
-    // Compute insights from the preliminary analysis, then populate
-     
     preliminary.insights = generateInsights(preliminary);
 
     return preliminary;
@@ -351,4 +472,67 @@ export class ApexDoctor {
   private sev(s: Issue['severity']): number {
     return { fatal: 0, error: 1, warning: 2, info: 3 }[s];
   }
+}
+
+/**
+ * Parse Apex stack-trace lines from an exception/fatal-error details block.
+ * Recognised patterns:
+ *   Class.AccountTrigger.handle: line 42, column 1
+ *   Trigger.AccountTrigger: line 12, column 1
+ *   AnonymousBlock: line 5, column 1
+ */
+function parseStackTrace(details: string): StackFrame[] {
+  const frames: StackFrame[] = [];
+  const re = /^\s*(?:Class\.|Trigger\.)?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_<>]*)*?)(?:\.([A-Za-z_][A-Za-z0-9_<>]*))?\s*:\s*line\s+(\d+)(?:,\s*column\s+(\d+))?/i;
+  for (const rawLine of details.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) { continue; }
+    const m = re.exec(trimmed);
+    if (m) {
+      frames.push({
+        className: m[1],
+        methodName: m[2],
+        line: Number(m[3]),
+        column: m[4] ? Number(m[4]) : undefined,
+        raw: trimmed,
+      });
+    }
+  }
+  return frames;
+}
+
+function extractExceptionMessage(details: string): string {
+  const lines = details.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) { return details; }
+  const stackRe = /:\s*line\s+\d+/i;
+  const messageLines: string[] = [];
+  for (const line of lines) {
+    if (stackRe.test(line)) { break; }
+    messageLines.push(line);
+  }
+  return messageLines.join('\n') || lines[0];
+}
+
+function parseLimitUsageBlock(detailsBlock: string): LimitUsage | undefined {
+  const lines = detailsBlock.split(/\r?\n/);
+  if (!lines.length) { return undefined; }
+  const firstLine = lines[0] || '';
+  const ns = (firstLine.split('|')[0] || '').trim() || '(default)';
+  const metrics: LimitMetric[] = [];
+  const lineRegex = /^\s*(?:Number of |Maximum )(.+?):\s*(\d+(?:\.\d+)?)\s+out of\s+(\d+(?:\.\d+)?)/i;
+  for (const line of lines.slice(1)) {
+    const m = lineRegex.exec(line);
+    if (m) {
+      const used = Number(m[2]);
+      const limit = Number(m[3]);
+      metrics.push({
+        name: m[1].trim(),
+        used,
+        limit,
+        pct: limit > 0 ? (used / limit) * 100 : 0
+      });
+    }
+  }
+  if (!metrics.length) { return undefined; }
+  return { namespace: ns, metrics };
 }

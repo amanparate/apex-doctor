@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
+import * as fsPromises from "fs/promises";
 import { ApexLogParser } from "./parser";
 import { ApexDoctor, Analysis } from "./analyzer";
-import { AiService } from "./aiService";
+import { AiService, ChatMessage } from "./aiService";
 import { renderAnalysisHtml } from "./webview";
 import { StreamingService } from "./streamingService";
 import { StreamView } from "./streamView";
@@ -15,14 +16,102 @@ import {
   UserSummary,
   DebugLevel,
 } from "./salesforceService";
+import {
+  RecentAnalysesProvider,
+  loadHistory,
+  saveAnalysisToHistory as saveEntryToWorkspace,
+  clearHistory,
+  removeEntry,
+} from "./recentHistory";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
 let currentLogUri: vscode.Uri | undefined;
+let currentChat: ChatMessage[] = [];
+let diagnosticCollection: vscode.DiagnosticCollection | undefined;
+let recentProvider: RecentAnalysesProvider | undefined;
+
+function saveAnalysisToHistory(
+  context: vscode.ExtensionContext,
+  uri: vscode.Uri,
+  analysis: Analysis,
+): void {
+  saveEntryToWorkspace(context, uri, analysis);
+  recentProvider?.refresh();
+}
+
+function severityToDiagnostic(s: Analysis["issues"][number]["severity"]): vscode.DiagnosticSeverity {
+  switch (s) {
+    case "fatal":
+    case "error":
+      return vscode.DiagnosticSeverity.Error;
+    case "warning":
+      return vscode.DiagnosticSeverity.Warning;
+    default:
+      return vscode.DiagnosticSeverity.Information;
+  }
+}
+
+function publishDiagnostics(uri: vscode.Uri, text: string, analysis: Analysis) {
+  if (!diagnosticCollection) { return; }
+  const enabled = vscode.workspace
+    .getConfiguration("apexDoctor")
+    .get<boolean>("enableInlineDiagnostics", true);
+  if (!enabled) {
+    diagnosticCollection.set(uri, []);
+    return;
+  }
+  const lines = text.split(/\r?\n/);
+  const apexLineToLogLine = new Map<number, number>();
+  const lineRefRegex = /\|\[(\d+)\]\|/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lineRefRegex.exec(lines[i]);
+    if (m) {
+      const apexLine = Number(m[1]);
+      if (!apexLineToLogLine.has(apexLine)) {
+        apexLineToLogLine.set(apexLine, i);
+      }
+    }
+  }
+  const diags: vscode.Diagnostic[] = [];
+  for (const issue of analysis.issues) {
+    if (!issue.lineNumber) { continue; }
+    const logLine = apexLineToLogLine.get(issue.lineNumber);
+    if (logLine === undefined) { continue; }
+    const lineText = lines[logLine] ?? "";
+    const range = new vscode.Range(logLine, 0, logLine, Math.max(0, lineText.length));
+    const diag = new vscode.Diagnostic(
+      range,
+      `[${issue.type}] ${issue.message.split(/\r?\n/)[0]}`,
+      severityToDiagnostic(issue.severity),
+    );
+    diag.source = "Apex Doctor";
+    diags.push(diag);
+  }
+  diagnosticCollection.set(uri, diags);
+}
+
+function isApexLogText(text: string): boolean {
+  const sample = text.slice(0, 4096);
+  return (
+    /\|EXECUTION_STARTED\b/.test(sample) ||
+    /^\s*\d+\.\d+\s+APEX_CODE,/m.test(sample) ||
+    /^\d{2}:\d{2}:\d{2}\.\d+\s*\(\d+\)\|/m.test(sample)
+  );
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const parser = new ApexLogParser();
   const analyzer = new ApexDoctor();
+  diagnosticCollection = vscode.languages.createDiagnosticCollection("apexDoctor");
+  context.subscriptions.push(diagnosticCollection);
+  recentProvider = new RecentAnalysesProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(
+      "apexDoctor.recent",
+      recentProvider,
+    ),
+  );
   const sf = new SalesforceService();
   const ai = new AiService(context.secrets);
   const classResolver = new ApexClassResolver();
@@ -200,8 +289,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
 
-      const fs = await import("fs");
-      const freshText = fs.readFileSync(filePath, "utf8");
+      const freshText = await fsPromises.readFile(filePath, "utf8");
       const doc = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(doc, {
         viewColumn: vscode.ViewColumn.One,
@@ -278,6 +366,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showErrorMessage("The file (or selection) is empty.");
         return;
       }
+      if (!isApexLogText(text)) {
+        const choice = await vscode.window.showWarningMessage(
+          "This doesn't look like a Salesforce Apex debug log. Continue anyway?",
+          "Analyse anyway",
+          "Cancel",
+        );
+        if (choice !== "Analyse anyway") {
+          return;
+        }
+      }
 
       await analyzeText(
         context,
@@ -335,8 +433,7 @@ export function activate(context: vscode.ExtensionContext) {
           }
         }
 
-        const fs = await import("fs");
-        const freshText = fs.readFileSync(filePath, "utf8");
+        const freshText = await fsPromises.readFile(filePath, "utf8");
 
         const doc = await vscode.workspace.openTextDocument(uri);
         await vscode.window.showTextDocument(doc, {
@@ -418,6 +515,47 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  const openRecentCmd = vscode.commands.registerCommand(
+    "apexDoctor.openRecent",
+    async (id: string) => {
+      const entry = loadHistory(context).find((e) => e.id === id);
+      if (!entry) {
+        vscode.window.showWarningMessage(
+          "That recent analysis is no longer available.",
+        );
+        recentProvider?.refresh();
+        return;
+      }
+      currentAnalysis = entry.analysis;
+      currentChat = [];
+      try {
+        currentLogUri = vscode.Uri.file(entry.source);
+      } catch {
+        currentLogUri = undefined;
+      }
+      openAnalysisPanel(context, entry.analysis, ai, sf, classResolver);
+    },
+  );
+
+  const clearRecentCmd = vscode.commands.registerCommand(
+    "apexDoctor.clearRecent",
+    () => {
+      clearHistory(context);
+      recentProvider?.refresh();
+      vscode.window.showInformationMessage("Recent analyses cleared.");
+    },
+  );
+
+  const removeRecentCmd = vscode.commands.registerCommand(
+    "apexDoctor.removeRecent",
+    (item: { id?: string } | undefined) => {
+      const id = item?.id;
+      if (!id) { return; }
+      removeEntry(context, id);
+      recentProvider?.refresh();
+    },
+  );
+
   context.subscriptions.push(
     analyzeCmd,
     fetchLogCmd,
@@ -425,6 +563,9 @@ export function activate(context: vscode.ExtensionContext) {
     startStreamCmd,
     stopStreamCmd,
     compareCmd,
+    openRecentCmd,
+    clearRecentCmd,
+    removeRecentCmd,
     traceFlagsCmd,
   );
 }
@@ -471,6 +612,9 @@ async function analyzeText(
 
       currentAnalysis = analysis;
       currentLogUri = uri;
+      currentChat = [];
+      publishDiagnostics(uri, text, analysis);
+      saveAnalysisToHistory(context, uri, analysis);
       openAnalysisPanel(context, analysis, ai, sf, classResolver);
     },
   );
@@ -502,33 +646,55 @@ function openAnalysisPanel(
   currentPanel = panel;
   panel.webview.html = renderAnalysisHtml(analysis);
 
+  const startInitialExplanation = async (focusIssue?: import("./analyzer").Issue) => {
+    if (!currentAnalysis) { return; }
+    const userPrompt = ai.buildInitialUserPrompt(currentAnalysis, focusIssue);
+    currentChat = [{ role: "user", content: userPrompt }];
+    let assistantText = "";
+    await ai.streamChat(
+      currentAnalysis,
+      currentChat,
+      (chunk) => {
+        assistantText += chunk;
+        panel.webview.postMessage({ command: "aiChunk", text: chunk });
+      },
+      () => {
+        currentChat.push({ role: "assistant", content: assistantText });
+        panel.webview.postMessage({ command: "aiDone" });
+      },
+      (err) => panel.webview.postMessage({ command: "aiError", error: err }),
+    );
+  };
+
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg.command === "explainAll") {
-      if (!currentAnalysis) {
-        return;
-      }
-      await ai.streamExplanation(
-        currentAnalysis,
-        undefined,
-        (chunk) =>
-          panel.webview.postMessage({ command: "aiChunk", text: chunk }),
-        () => panel.webview.postMessage({ command: "aiDone" }),
-        (err) => panel.webview.postMessage({ command: "aiError", error: err }),
-      );
+      await startInitialExplanation(undefined);
     } else if (msg.command === "explainIssue") {
-      if (!currentAnalysis) {
-        return;
-      }
+      if (!currentAnalysis) { return; }
       const issue = currentAnalysis.issues[msg.index];
-      if (!issue) {
-        return;
+      if (!issue) { return; }
+      await startInitialExplanation(issue);
+    } else if (msg.command === "chatTurn") {
+      if (!currentAnalysis) { return; }
+      const userMessage: string = (msg.text || "").trim();
+      if (!userMessage) { return; }
+      if (!currentChat.length) {
+        currentChat = [{ role: "user", content: ai.buildInitialUserPrompt(currentAnalysis) }];
       }
-      await ai.streamExplanation(
+      currentChat.push({ role: "user", content: userMessage });
+      panel.webview.postMessage({ command: "chatUserEcho", text: userMessage });
+      let assistantText = "";
+      await ai.streamChat(
         currentAnalysis,
-        issue,
-        (chunk) =>
-          panel.webview.postMessage({ command: "aiChunk", text: chunk }),
-        () => panel.webview.postMessage({ command: "aiDone" }),
+        currentChat,
+        (chunk) => {
+          assistantText += chunk;
+          panel.webview.postMessage({ command: "aiChunk", text: chunk });
+        },
+        () => {
+          currentChat.push({ role: "assistant", content: assistantText });
+          panel.webview.postMessage({ command: "aiDone" });
+        },
         (err) => panel.webview.postMessage({ command: "aiError", error: err }),
       );
     } else if (msg.command === "jumpToLine") {
@@ -536,9 +702,7 @@ function openAnalysisPanel(
     } else if (msg.command === "openClass") {
       await handleOpenClass(msg.className, msg.line, classResolver, sf);
     } else if (msg.command === "exportMarkdown") {
-      if (!currentAnalysis) {
-        return;
-      }
+      if (!currentAnalysis) { return; }
       const md = buildMarkdownReport(currentAnalysis, msg.aiText || "");
       await vscode.env.clipboard.writeText(md);
       vscode.window.showInformationMessage(
@@ -551,6 +715,7 @@ function openAnalysisPanel(
     currentPanel = undefined;
     currentAnalysis = undefined;
     currentLogUri = undefined;
+    currentChat = [];
   });
 }
 

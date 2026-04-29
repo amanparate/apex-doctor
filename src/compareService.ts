@@ -18,8 +18,11 @@ export interface MethodDelta {
   name: string;
   baselineMs?: number;
   comparisonMs?: number;
+  baselineCalls: number;
+  comparisonCalls: number;
   deltaMs: number;
   deltaPct: number;  // positive = slower, negative = faster
+  callsDelta: number;
   status: 'new' | 'removed' | 'regressed' | 'improved' | 'unchanged';
 }
 
@@ -121,15 +124,20 @@ export class CompareService {
   }
 
   private diffMethods(baseline: MethodEntry[], comparison: MethodEntry[]): MethodDelta[] {
-    const bMap = new Map<string, MethodEntry>();
-    const cMap = new Map<string, MethodEntry>();
+    type Aggregate = { totalMs: number; calls: number };
+    const bMap = new Map<string, Aggregate>();
+    const cMap = new Map<string, Aggregate>();
     for (const m of baseline) {
-      const existing = bMap.get(m.name);
-      if (!existing || m.durationMs > existing.durationMs) { bMap.set(m.name, m); }
+      const e = bMap.get(m.name) ?? { totalMs: 0, calls: 0 };
+      e.totalMs += m.durationMs;
+      e.calls += 1;
+      bMap.set(m.name, e);
     }
     for (const m of comparison) {
-      const existing = cMap.get(m.name);
-      if (!existing || m.durationMs > existing.durationMs) { cMap.set(m.name, m); }
+      const e = cMap.get(m.name) ?? { totalMs: 0, calls: 0 };
+      e.totalMs += m.durationMs;
+      e.calls += 1;
+      cMap.set(m.name, e);
     }
 
     const allNames = new Set<string>([...bMap.keys(), ...cMap.keys()]);
@@ -138,8 +146,10 @@ export class CompareService {
     for (const name of allNames) {
       const b = bMap.get(name);
       const c = cMap.get(name);
-      const bMs = b?.durationMs ?? 0;
-      const cMs = c?.durationMs ?? 0;
+      const bMs = b?.totalMs ?? 0;
+      const cMs = c?.totalMs ?? 0;
+      const bCalls = b?.calls ?? 0;
+      const cCalls = c?.calls ?? 0;
       const deltaMs = cMs - bMs;
       const deltaPct = bMs > 0 ? (deltaMs / bMs) * 100 : (cMs > 0 ? 100 : 0);
 
@@ -152,15 +162,17 @@ export class CompareService {
 
       deltas.push({
         name,
-        baselineMs: b?.durationMs,
-        comparisonMs: c?.durationMs,
+        baselineMs: b?.totalMs,
+        comparisonMs: c?.totalMs,
+        baselineCalls: bCalls,
+        comparisonCalls: cCalls,
         deltaMs,
         deltaPct,
+        callsDelta: cCalls - bCalls,
         status
       });
     }
 
-    // Sort: biggest regressions first, then new methods, then others
     return deltas.sort((x, y) => {
       const xRank = this.rank(x);
       const yRank = this.rank(y);

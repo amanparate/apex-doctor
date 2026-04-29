@@ -88,9 +88,13 @@ export function renderComparisonHtml(c: Comparison): string {
       improved: '<span class="status-pill improved">FASTER</span>',
       unchanged: '<span class="status-pill unchanged">=</span>'
     }[m.status];
+    const callsCell = m.baselineCalls === m.comparisonCalls
+      ? `${m.comparisonCalls}`
+      : `${m.baselineCalls} → ${m.comparisonCalls} <span class="delta ${deltaClass(m.callsDelta)}">${signedInt(m.callsDelta)}</span>`;
     return `
       <tr>
         <td><code>${esc(m.name)}</code> ${statusBadge}</td>
+        <td>${callsCell}</td>
         <td>${m.baselineMs !== undefined ? fmt(m.baselineMs) + ' ms' : '-'}</td>
         <td>${m.comparisonMs !== undefined ? fmt(m.comparisonMs) + ' ms' : '-'}</td>
         <td class="${deltaClass(m.deltaMs)}">${signed(m.deltaMs, ' ms')}</td>
@@ -164,9 +168,10 @@ export function renderComparisonHtml(c: Comparison): string {
     <h2>Summary Deltas</h2>
     ${summaryCards}
     <h2>🐌 Method Performance (top 30 changes)</h2>
+    <p class="muted">Total time per method (sum of all calls). "Calls" shows invocation count.</p>
     <table>
-      <tr><th>Method</th><th>Baseline</th><th>Comparison</th><th>Δ ms</th><th>Δ %</th></tr>
-      ${methodRows || '<tr><td colspan="5" class="muted">No method data to compare.</td></tr>'}
+      <tr><th>Method</th><th>Calls</th><th>Baseline (total)</th><th>Comparison (total)</th><th>Δ ms</th><th>Δ %</th></tr>
+      ${methodRows || '<tr><td colspan="6" class="muted">No method data to compare.</td></tr>'}
     </table>
     <h2>🛑 Issue Diff</h2>
     <p class="muted">${c.issues.commonCount} issue${c.issues.commonCount === 1 ? '' : 's'} present in both logs.</p>
@@ -236,10 +241,13 @@ export function buildComparisonMarkdown(c: Comparison): string {
   if (regressed.length) {
     lines.push(`## 🐌 Method Regressions (top 20)`);
     lines.push('');
-    lines.push(`| Method | Baseline (ms) | Comparison (ms) | Δ ms | Δ % |`);
-    lines.push(`|---|---|---|---|---|`);
+    lines.push(`| Method | Calls | Baseline total (ms) | Comparison total (ms) | Δ ms | Δ % |`);
+    lines.push(`|---|---|---|---|---|---|`);
     for (const m of regressed) {
-      lines.push(`| \`${m.name}\` | ${m.baselineMs?.toFixed(2) ?? '-'} | ${m.comparisonMs?.toFixed(2) ?? '-'} | ${signed(m.deltaMs, ' ms')} | ${m.baselineMs ? signed(m.deltaPct, '%') : 'n/a'} |`);
+      const calls = m.baselineCalls === m.comparisonCalls
+        ? `${m.comparisonCalls}`
+        : `${m.baselineCalls} → ${m.comparisonCalls}`;
+      lines.push(`| \`${m.name}\` | ${calls} | ${m.baselineMs?.toFixed(2) ?? '-'} | ${m.comparisonMs?.toFixed(2) ?? '-'} | ${signed(m.deltaMs, ' ms')} | ${m.baselineMs ? signed(m.deltaPct, '%') : 'n/a'} |`);
     }
     lines.push('');
   }
