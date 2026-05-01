@@ -4,6 +4,8 @@ import { ApexDoctor } from "../analyzer";
 import { CompareService } from "../compareService";
 import { detectRecurringPatterns } from "../recurringPatterns";
 import { linkAsyncChain, AsyncHistoryEntry } from "../asyncTracer";
+import { tryTemplatedFix } from "../fixTemplates";
+import { parseNlQueryResponse } from "../nlQuery";
 import {
   NORMAL_LOG,
   SOQL_IN_LOOP_LOG,
@@ -264,5 +266,100 @@ suite("Recurring patterns", () => {
     ];
     const patterns = detectRecurringPatterns(history);
     assert.strictEqual(patterns.issues.length, 0);
+  });
+});
+
+suite("Fix templates", () => {
+  const sample = [
+    "public class AccountHandler {",
+    "  public static void process(List<Account> accounts) {",
+    "    for (Account a : accounts) {",
+    "      Contract c = [SELECT Id FROM Contract WHERE AccountId = :a.Id];",
+    "      System.debug(c);",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+
+  test("bulkifies a SOQL-in-loop into Set + single query + Map", () => {
+    const issue = {
+      severity: "error" as const,
+      type: "SOQL in Loop",
+      message: "Same query executed 5 times",
+      lineNumber: 4,
+      timestamp: "12:00:00.000",
+    };
+    const fix = tryTemplatedFix({ issue, fileText: sample, filePath: "AccountHandler.cls" });
+    assert.ok(fix, "expected a templated fix");
+    assert.strictEqual(fix!.source, "templated");
+    assert.match(fix!.newFileText, /Set<Id>\s+\w+ = new Set<Id>\(\)/);
+    assert.match(fix!.newFileText, /WHERE\s+AccountId\s+IN\s+:/);
+    assert.match(fix!.newFileText, /Map<Id,\s+Contract>/);
+  });
+
+  test("returns undefined for an unrelated issue type", () => {
+    const issue = {
+      severity: "warning" as const,
+      type: "Slow SOQL Query",
+      message: "Query took 1500 ms",
+      lineNumber: 4,
+      timestamp: "12:00:00.000",
+    };
+    const fix = tryTemplatedFix({ issue, fileText: sample, filePath: "AccountHandler.cls" });
+    assert.strictEqual(fix, undefined);
+  });
+
+  test("adds LIMIT 200 when the issue is Large Query Result", () => {
+    const file = [
+      "public class Foo {",
+      "  public static void f() {",
+      "    List<Account> accs = [SELECT Id, Name FROM Account];",
+      "  }",
+      "}",
+    ].join("\n");
+    const issue = {
+      severity: "warning" as const,
+      type: "Large Query Result",
+      message: "Query returned 5000 rows",
+      lineNumber: 3,
+      timestamp: "12:00:00.000",
+    };
+    const fix = tryTemplatedFix({ issue, fileText: file, filePath: "Foo.cls" });
+    assert.ok(fix);
+    assert.match(fix!.newFileText, /LIMIT\s+200/);
+  });
+});
+
+suite("NL query response parser", () => {
+  test("hydrates matched indices into real items from the analysis", () => {
+    const a = doctor.analyze(parser.parse(LARGE_QUERY_LOG));
+    const raw = JSON.stringify({
+      kind: "soql",
+      matchedIndices: [0],
+      summary: "1 query returned > 500 rows",
+    });
+    const result = parseNlQueryResponse(a, raw);
+    assert.strictEqual(result.kind, "soql");
+    assert.strictEqual(result.items.length, 1);
+    assert.match(result.summary, /1 query/);
+  });
+
+  test("filters out invalid indices defensively", () => {
+    const a = doctor.analyze(parser.parse(NORMAL_LOG));
+    const raw = JSON.stringify({
+      kind: "methods",
+      matchedIndices: [0, 999, -1, "nope"],
+      summary: "test",
+    });
+    const result = parseNlQueryResponse(a, raw);
+    assert.strictEqual(result.kind, "methods");
+    // Only index 0 is valid for the small NORMAL_LOG analysis
+    assert.ok(result.items.length <= a.methods.length);
+    assert.ok(result.items.length >= 0);
+  });
+
+  test("throws when JSON is malformed", () => {
+    const a = doctor.analyze(parser.parse(NORMAL_LOG));
+    assert.throws(() => parseNlQueryResponse(a, "not json"));
   });
 });

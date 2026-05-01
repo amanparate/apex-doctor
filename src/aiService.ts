@@ -257,6 +257,87 @@ ${this.buildContext(analysis)}`;
     );
   }
 
+  /**
+   * Single-shot completion. Used for tasks that don't benefit from streaming,
+   * e.g. a JSON response (NL query) or a one-off code refactor.
+   *
+   * Returns the full assistant text, or undefined on failure.
+   */
+  async completeOnce(prompt: string, opts?: { systemOverride?: string; maxTokens?: number }): Promise<string | undefined> {
+    return new Promise((resolve) => {
+      const messages: ChatMessage[] = [{ role: "user", content: prompt }];
+      // Build a tiny analysis stub if streamChat needs it for the system prompt.
+      const stubSystem = opts?.systemOverride ?? "You are a senior Salesforce Apex developer. Be precise and follow the user's output format exactly.";
+      let buf = "";
+      this.streamChatRaw(
+        stubSystem,
+        messages,
+        opts?.maxTokens,
+        (chunk) => {
+          buf += chunk;
+        },
+        () => resolve(buf || undefined),
+        () => resolve(undefined),
+      );
+    });
+  }
+
+  private async streamChatRaw(
+    system: string,
+    messages: ChatMessage[],
+    maxTokensOverride: number | undefined,
+    onChunk: (text: string) => void,
+    onDone: (fullText: string) => void,
+    onError: (err: string) => void,
+  ): Promise<void> {
+    const apiKey = await this.getApiKey();
+    if (!apiKey) {
+      onError("No API key provided.");
+      return;
+    }
+
+    const config = vscode.workspace.getConfiguration("apexDoctor");
+    const provider = this.getProvider();
+    const cfg = PROVIDERS[provider];
+
+    if (apiKey) {
+      const validation = cfg.validateKey(apiKey);
+      if (validation) {
+        onError(
+          `Saved API key doesn't match provider "${provider}": ${validation}.`,
+        );
+        return;
+      }
+    }
+
+    const model = config.get<string>("model") || cfg.defaultModel;
+    const maxTokens = maxTokensOverride ?? config.get<number>("maxTokens") ?? 1500;
+
+    switch (provider) {
+      case "anthropic":
+        return this.streamAnthropic(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
+      case "openrouter":
+        return this.streamOpenAICompat(
+          {
+            host: "openrouter.ai",
+            path: "/api/v1/chat/completions",
+            extraHeaders: {
+              "HTTP-Referer": "https://github.com/amanparate/apex-doctor",
+              "X-Title": "Apex Doctor",
+            },
+          },
+          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
+        );
+      case "openai":
+        return this.streamOpenAICompat(
+          { host: "api.openai.com", path: "/v1/chat/completions" },
+          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
+        );
+      case "gemini":
+        return this.streamGemini(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
+    }
+  }
+
   async streamChat(
     analysis: Analysis,
     messages: ChatMessage[],

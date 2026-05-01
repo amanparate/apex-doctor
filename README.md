@@ -10,6 +10,8 @@
 
 Paste any Salesforce Apex debug log into VS Code, right-click, and get an instant, structured breakdown:
 
+- 💬 **Ask the Log (natural language)** — _"show me SOQL that returned > 500 rows"_, _"methods after the exception"_, _"debugs from AccountHandler"_. LLM picks the right array; we hydrate the matched rows locally so nothing is fabricated.
+- 🔧 **Suggest fix — one-click refactor with diff preview** — for SOQL-in-loop, missing LIMIT, and more. Templated transforms when a pattern matches; AI fallback otherwise. Always preview-then-apply via VS Code's diff view.
 - 🔥 **CPU Profiler** — self-time attribution, hot path, single-bottleneck callout. The first Apex tool that tells you _where_ the CPU actually went, not just which method took longest.
 - 🔁 **Recurring patterns** — _"this NullPointerException has appeared 4 times this week"_. Cross-log analytics on your saved analyses.
 - ⚡ **Async tracer** — stitches together parent and child logs for `@future` / Queueable / Batch / Schedulable, so you can see the full async chain.
@@ -32,6 +34,45 @@ Paste any Salesforce Apex debug log into VS Code, right-click, and get an instan
 - 🔀 **Compare two logs** — side-by-side diff for before / after optimisations
 - 🗂️ **Recent analyses** — last 10 analyses persisted per workspace, one click to reopen
 - 🤖 **AI root-cause + follow-up chat** — OpenRouter, Anthropic, OpenAI, or Google Gemini
+
+---
+
+## 💬 Ask the Log — natural-language query
+
+**New in v0.6.0** — type a question into the new input box at the top of the Overview tab and Apex Doctor returns the matching rows from the parsed log:
+
+- _"SOQL queries that returned more than 500 rows"_ → a filtered SOQL table
+- _"methods that ran after the exception was thrown"_ → a filtered methods table
+- _"all debug statements from AccountHandler"_ → a filtered debug list
+- _"errors with a NullPointerException"_ → a filtered issues list
+
+How it works:
+
+- Apex Doctor sends the question + a compact summary of the analysis to your configured LLM (OpenRouter / Anthropic / OpenAI / Gemini).
+- The LLM responds with the matched **indices** into one of the analysis arrays (`soql`, `dml`, `methods`, `debugs`, `issues`, `code_units`).
+- We hydrate those indices locally — _the LLM never returns row data, so it can't fabricate results_.
+- Anything ambiguous → no false matches; the result is just empty with a 1-line explanation.
+
+---
+
+## 🔧 Suggest fix — one-click refactor with diff preview
+
+**New in v0.6.0** — every issue card has a **🔧 Suggest fix** button. Apex Doctor:
+
+1. Resolves the source `.cls` file from the issue's class hint or stack trace
+2. Tries a **templated transform** first — deterministic, instant, no API call
+3. Falls back to the **LLM** for the long tail
+4. Opens a **VS Code diff view** comparing the original to the suggested rewrite
+5. Asks "Apply fix?" with explicit modal confirmation. Nothing auto-applies.
+
+### Templated transforms shipped today
+
+- **SOQL-in-loop → bulkified** — collects the loop variable's `.Id` into a `Set<Id>`, runs a single query before the loop, replaces the inline query with a `Map` lookup. Conservative match: only fires when the WHERE clause references the loop variable directly.
+- **Large Query Result → adds LIMIT 200** — drops a `LIMIT 200` onto a SELECT that doesn't already have one.
+
+### AI fallback
+
+For any issue without a matching template, Apex Doctor sends the full file + a 40-line window around the flagged line + the issue context to your configured LLM and asks for the rewritten file. The result still goes through the diff-preview-then-apply flow — you always see what's about to change.
 
 ---
 

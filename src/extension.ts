@@ -26,6 +26,8 @@ import {
 import { detectRecurringPatterns, RecurringPatterns } from "./recurringPatterns";
 import { linkAsyncChain, AsyncHistoryEntry, AsyncLink } from "./asyncTracer";
 import { RecurringIssuesProvider } from "./recurringIssuesView";
+import { suggestFixForIssue, FixDiffContentProvider } from "./fixSuggestions";
+import { buildNlQueryPrompt, parseNlQueryResponse, NlQueryResult } from "./nlQuery";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
@@ -141,6 +143,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider(
       "apexDoctor.recurring",
       recurringProvider,
+    ),
+  );
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      "apexdoctor-fix",
+      new FixDiffContentProvider(),
     ),
   );
   const sf = new SalesforceService();
@@ -751,6 +759,52 @@ function openAnalysisPanel(
       vscode.window.showInformationMessage(
         "Analysis copied to clipboard as Markdown.",
       );
+    } else if (msg.command === "suggestFix") {
+      if (!currentAnalysis) { return; }
+      const issue = currentAnalysis.issues[msg.index];
+      if (!issue) { return; }
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: "Generating fix…" },
+        async () => {
+          await suggestFixForIssue(issue, msg.classNameHint, ai, classResolver);
+        },
+      );
+    } else if (msg.command === "askLog") {
+      if (!currentAnalysis) { return; }
+      const question: string = (msg.text || "").trim();
+      if (!question) { return; }
+      panel.webview.postMessage({ command: "askLogPending" });
+      try {
+        const prompt = buildNlQueryPrompt(currentAnalysis, question);
+        const raw = await ai.completeOnce(prompt, { maxTokens: 800 });
+        if (!raw) {
+          panel.webview.postMessage({
+            command: "askLogResult",
+            error: "No response from the AI provider. Check your API key.",
+          });
+          return;
+        }
+        let result: NlQueryResult;
+        try {
+          result = parseNlQueryResponse(currentAnalysis, raw);
+        } catch (e: any) {
+          panel.webview.postMessage({
+            command: "askLogResult",
+            error: `Couldn't parse the AI response: ${e.message}`,
+            raw: raw.slice(0, 400),
+          });
+          return;
+        }
+        panel.webview.postMessage({
+          command: "askLogResult",
+          result,
+        });
+      } catch (e: any) {
+        panel.webview.postMessage({
+          command: "askLogResult",
+          error: e.message || "Unknown error.",
+        });
+      }
     }
   });
 

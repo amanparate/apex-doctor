@@ -107,6 +107,7 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
           ${i.lineNumber ? `<a href="#" class="line-link" data-line="${i.lineNumber}">line ${i.lineNumber}</a>` : ""}
           <span class="muted">@ ${esc(i.timestamp)}</span>
           <button class="mini" onclick="explainIssue(${idx})">🤖 Explain this</button>
+          <button class="mini" onclick="suggestFix(${idx})">🔧 Suggest fix</button>
         </div>
         <pre>${esc(i.message)}</pre>
         ${renderStackFrames(i.stackFrames)}
@@ -303,6 +304,14 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
     .test-pill.test-pass { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
     .test-pill.test-fail { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
     .test-row.fail { background: rgba(239, 68, 68, 0.05); }
+    .ask-row { display: flex; gap: 8px; margin: 8px 0 4px; }
+    .ask-row input { flex: 1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); padding: 6px 10px; border-radius: 4px; font-size: 13px; }
+    .ask-row input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+    .ask-summary { font-size: 12px; opacity: 0.85; margin: 8px 0 4px; }
+    .ask-empty { font-size: 12px; opacity: 0.7; margin: 8px 0; }
+    .ask-error { font-size: 12px; color: #d33; margin: 8px 0; padding: 8px; border-left: 3px solid #d33; background: rgba(239, 68, 68, 0.05); }
+    .ask-table { margin: 6px 0 14px; }
+    .ask-table th, .ask-table td { font-size: 12px; }
     ${tabSwitchingCss()}
   </style></head>
   <body>
@@ -361,6 +370,14 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
       <h2>🛑 Issues &amp; Errors</h2>
       ${issuesHtml}
+
+      <h2>💬 Ask the Log</h2>
+      <p class="muted small">Natural-language query over the parsed log. Examples: <em>"SOQL queries that returned more than 500 rows"</em>, <em>"methods that ran after the exception"</em>, <em>"debug statements from AccountHandler"</em>.</p>
+      <div class="ask-row">
+        <input id="ask-input" type="text" placeholder="Ask anything about this log…" />
+        <button id="ask-btn" onclick="askLog()">Ask</button>
+      </div>
+      <div id="ask-results"></div>
 
       ${renderTriggerOrder(a.triggerGroups)}
 
@@ -468,6 +485,68 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
         vscode.postMessage({ command: 'chatTurn', text });
       }
 
+      function suggestFix(idx) {
+        vscode.postMessage({ command: 'suggestFix', index: idx });
+      }
+
+      function askLog() {
+        const input = document.getElementById('ask-input');
+        const text = (input.value || '').trim();
+        if (!text) { return; }
+        const btn = document.getElementById('ask-btn');
+        const out = document.getElementById('ask-results');
+        btn.disabled = true;
+        btn.textContent = 'Asking…';
+        out.innerHTML = '';
+        vscode.postMessage({ command: 'askLog', text });
+      }
+
+      const askInput = document.getElementById('ask-input');
+      askInput && askInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askLog(); }
+      });
+
+      function renderAskResult(msg) {
+        const out = document.getElementById('ask-results');
+        const btn = document.getElementById('ask-btn');
+        btn.disabled = false;
+        btn.textContent = 'Ask';
+        if (msg.error) {
+          out.innerHTML = '<div class="ask-error">⚠️ ' + escapeHtmlInline(msg.error) + (msg.raw ? '<details><summary>Raw response</summary><pre>' + escapeHtmlInline(msg.raw) + '</pre></details>' : '') + '</div>';
+          return;
+        }
+        const r = msg.result;
+        if (!r || !r.items || !r.items.length) {
+          out.innerHTML = '<div class="ask-empty">' + escapeHtmlInline(r?.summary || 'No matches.') + '</div>';
+          return;
+        }
+        const headerByKind = {
+          soql: ['Query', 'Rows', 'ms', 'Line'],
+          dml: ['Op', 'Rows', 'ms', 'Line'],
+          methods: ['Method', 'ms', 'Line', ''],
+          debugs: ['Level', 'Message', 'Line', ''],
+          issues: ['Sev', 'Type', 'Message', 'Line'],
+          code_units: ['Code Unit', 'ms', '', '']
+        };
+        const headers = headerByKind[r.kind] || ['#', 'Detail', '', ''];
+        const rows = r.items.map((it) => {
+          const cells = (() => {
+            switch (r.kind) {
+              case 'soql': return [escapeHtmlInline(it.query || ''), it.rows ?? '-', (it.durationMs || 0).toFixed(1), it.lineNumber ?? '-'];
+              case 'dml': return [escapeHtmlInline(it.operation || ''), it.rows ?? '-', (it.durationMs || 0).toFixed(1), it.lineNumber ?? '-'];
+              case 'methods': return [escapeHtmlInline(it.name || ''), (it.durationMs || 0).toFixed(1), it.lineNumber ?? '-', ''];
+              case 'debugs': return [escapeHtmlInline(it.level || ''), escapeHtmlInline((it.message || '').slice(0, 200)), it.lineNumber ?? '-', ''];
+              case 'issues': return [escapeHtmlInline(it.severity || ''), escapeHtmlInline(it.type || ''), escapeHtmlInline((it.message || '').slice(0, 160)), it.lineNumber ?? '-'];
+              case 'code_units': return [escapeHtmlInline(it.name || ''), (it.durationMs || 0).toFixed(1), '', ''];
+              default: return ['', JSON.stringify(it), '', ''];
+            }
+          })();
+          return '<tr>' + cells.map((c) => '<td>' + c + '</td>').join('') + '</tr>';
+        }).join('');
+        out.innerHTML = '<div class="ask-summary">' + escapeHtmlInline(r.summary) + ' (' + r.items.length + ' result' + (r.items.length === 1 ? '' : 's') + ')</div>' +
+          '<table class="ask-table"><thead><tr>' + headers.map((h) => '<th>' + escapeHtmlInline(h) + '</th>').join('') + '</tr></thead><tbody>' + rows + '</tbody></table>';
+      }
+
       chatInput && chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -558,6 +637,8 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
           output.innerHTML += '<p style="color:#d33">⚠️ ' + msg.error + '</p>';
         } else if (msg.command === 'chatUserEcho') {
           appendUserBubble(msg.text);
+        } else if (msg.command === 'askLogResult') {
+          renderAskResult(msg);
         }
       });
 

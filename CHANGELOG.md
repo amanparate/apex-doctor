@@ -5,6 +5,20 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-05-01
+
+### Added
+
+- **💬 Ask the Log — natural-language query** — a new input box at the top of the Overview tab. Ask things like _"SOQL queries that returned more than 500 rows"_ or _"methods that ran after the exception"_ in plain English; the LLM picks the right array and returns indices we hydrate locally (so it can't fabricate rows). Results render as a focused table.
+- **🔧 Suggest fix — one-click refactor with diff preview** — every issue card now has a "Suggest fix" button. Apex Doctor tries a templated transform first (deterministic, instant), then falls back to the LLM for the long tail. Both paths open a real VS Code diff and require explicit "Apply fix" confirmation — never auto-applies.
+  - **Templated fixes** ship for: SOQL-in-loop bulkification (Set + single query + Map lookup) and adding `LIMIT 200` to a runaway query. More patterns to follow.
+  - **AI fix** sends the full file plus a relevant 40-line window around the issue, asks for the rewritten file in a code block, and uses the result as the proposed change.
+- **`completeOnce` API in AiService** — single-shot non-streaming completion used by the NL query and AI-fix flows. Stitches over the same provider router (OpenRouter / Anthropic / OpenAI / Gemini), so all four work for both features.
+
+### Tests
+
+- Test count up from 22 → 28: bulkification template, missing-LIMIT template, NL query response parsing, and defensive index validation.
+
 ## [0.5.0] — 2026-05-01
 
 ### Added
