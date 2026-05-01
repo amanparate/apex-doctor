@@ -1,6 +1,10 @@
 import { ParsedLog, LogEvent } from './parser';
 import * as vscode from 'vscode';
 import { generateInsights, Insight } from './insights';
+import { buildCpuProfile, CpuProfile } from './profiler';
+import { extractTriggers, TriggerPhaseGroup } from './triggerOrder';
+import { extractAsyncInvocations, detectAsyncEntryPoint, AsyncInvocation, AsyncEntryPoint } from './asyncTracer';
+import { recommendDebugLevels, DebugLevelRecommendation } from './debugLevelAdvisor';
 
 export interface StackFrame {
   className: string;
@@ -77,6 +81,11 @@ export interface Analysis {
   userInfo?: { Name: string; Username: string; Email: string; ProfileName?: string };
   flameRoot: FlameNode;
   insights: Insight[];
+  cpuProfile: CpuProfile;
+  triggerGroups: TriggerPhaseGroup[];
+  asyncInvocations: AsyncInvocation[];
+  asyncEntryPoint?: AsyncEntryPoint;
+  debugLevelRecommendations: DebugLevelRecommendation[];
 }
 
 export class ApexDoctor {
@@ -461,7 +470,12 @@ export class ApexDoctor {
       codeUnits,
       testResults,
       flameRoot,
-      insights: []
+      insights: [],
+      cpuProfile: buildCpuProfile(flameRoot, sortedMethods),
+      triggerGroups: extractTriggers(parsed.events),
+      asyncInvocations: extractAsyncInvocations(parsed.events),
+      asyncEntryPoint: detectAsyncEntryPoint(parsed.events),
+      debugLevelRecommendations: recommendDebugLevels(parsed),
     };
 
     preliminary.insights = generateInsights(preliminary);

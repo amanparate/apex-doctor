@@ -1,6 +1,22 @@
 import { Analysis, LimitUsage } from "./analyzer";
 import { renderAreaChartHtml } from "./areaChart";
 import { Insight } from "./insights";
+import { AsyncLink } from "./asyncTracer";
+import { RecurringPatterns } from "./recurringPatterns";
+import {
+  renderCpuProfiler,
+  renderTriggerOrder,
+  renderAsyncTracer,
+  renderDebugLevelRecs,
+  renderRecurringBanner,
+  tabSwitchingCss,
+  tabSwitchingScript,
+} from "./webviewSections";
+
+export interface AnalysisRenderOptions {
+  recurring?: RecurringPatterns;
+  asyncLinks?: AsyncLink[];
+}
 
 function escapeHtml(s: string): string {
   return (s ?? "").replace(
@@ -62,7 +78,7 @@ function renderLimitsHtml(limits: LimitUsage[]): string {
   return blocks.join("");
 }
 
-export function renderAnalysisHtml(a: Analysis): string {
+export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions = {}): string {
   const fmt = (n?: number) => (n ?? 0).toFixed(2);
   const esc = escapeHtml;
 
@@ -287,12 +303,15 @@ export function renderAnalysisHtml(a: Analysis): string {
     .test-pill.test-pass { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
     .test-pill.test-fail { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
     .test-row.fail { background: rgba(239, 68, 68, 0.05); }
+    ${tabSwitchingCss()}
   </style></head>
   <body>
     <h1>Apex Doctor</h1>
     <p class="tagline">API ${esc(a.summary.apiVersion)} · ${a.summary.totalEvents} events · ${fmt(a.summary.totalDurationMs)} ms total</p>
 
     ${userInfoHtml}
+
+    ${renderRecurringBanner(options.recurring)}
 
     <div class="summary">
       <div class="card"><div class="l">Total Duration</div><div class="v">${fmt(a.summary.totalDurationMs)} ms</div></div>
@@ -307,54 +326,77 @@ export function renderAnalysisHtml(a: Analysis): string {
       <button onclick="explainAll()" id="btn-explain-all">🤖 Explain root cause with AI</button>
       <button onclick="exportMarkdown()">📋 Copy as Markdown</button>
     </div>
-    ${
-      a.insights.length
-        ? `
-      <h2>💡 Performance Insights</h2>
-      ${renderInsightsHtml(a.insights)}
-    `
-        : ""
-    }
 
-    <div class="ai-panel" id="ai-panel" style="display:none">
-      <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>
-      <div id="chat-history"></div>
-      <div id="ai-output"></div>
-      <div class="chat-input-row">
-        <input id="chat-msg" type="text" placeholder="Ask a follow-up… e.g. 'What if we made this query selective?'" />
-        <button id="chat-send" onclick="sendChat()">Send</button>
-      </div>
+    <div class="tabs">
+      <button class="tab-btn" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="profiler">Profiler</button>
+      <button class="tab-btn" data-tab="tables">Tables</button>
     </div>
 
-    ${
-      testResultsHtml
-        ? `<h2>🧪 Test Results</h2>${testResultsHtml}`
-        : ""
-    }
+    <div class="tab-panel" data-panel="overview">
+      ${
+        a.insights.length
+          ? `
+        <h2>💡 Performance Insights</h2>
+        ${renderInsightsHtml(a.insights)}
+      `
+          : ""
+      }
 
-    <h2>🛑 Issues &amp; Errors</h2>
-    ${issuesHtml}
+      <div class="ai-panel" id="ai-panel" style="display:none">
+        <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>
+        <div id="chat-history"></div>
+        <div id="ai-output"></div>
+        <div class="chat-input-row">
+          <input id="chat-msg" type="text" placeholder="Ask a follow-up… e.g. 'What if we made this query selective?'" />
+          <button id="chat-send" onclick="sendChat()">Send</button>
+        </div>
+      </div>
 
-    <h2>📈 Activity Timeline</h2>
-    ${flameHtml}
+      ${
+        testResultsHtml
+          ? `<h2>🧪 Test Results</h2>${testResultsHtml}`
+          : ""
+      }
 
-    <h2>📊 Code Units</h2>
-    ${codeUnitsHtml}
+      <h2>🛑 Issues &amp; Errors</h2>
+      ${issuesHtml}
 
-    <h2>🐌 Slowest Methods (top 50)</h2>
-    ${methodsHtml}
+      ${renderTriggerOrder(a.triggerGroups)}
 
-    <h2>🗃️ SOQL Queries</h2>
-    ${soqlHtml}
+      ${renderAsyncTracer(a.asyncInvocations, options.asyncLinks ?? [], a.asyncEntryPoint)}
 
-    <h2>✏️ DML Operations</h2>
-    ${dmlHtml}
+      ${renderDebugLevelRecs(a.debugLevelRecommendations)}
 
-    <h2>🐞 Debug Statements</h2>
-    ${debugsHtml}
+      <h2>📈 Activity Timeline</h2>
+      ${flameHtml}
 
-    <h2>📈 Governor Limits</h2>
-    ${limitsHtml}
+      <h2>📈 Governor Limits</h2>
+      ${limitsHtml}
+    </div>
+
+    <div class="tab-panel" data-panel="profiler">
+      <h2>CPU Profiler</h2>
+      <p class="muted">Self-time attribution and hot-path analysis. Find <em>where</em> the CPU actually went, not just which method took longest.</p>
+      ${renderCpuProfiler(a)}
+    </div>
+
+    <div class="tab-panel" data-panel="tables">
+      <h2>📊 Code Units</h2>
+      ${codeUnitsHtml}
+
+      <h2>🐌 Slowest Methods (top 50)</h2>
+      ${methodsHtml}
+
+      <h2>🗃️ SOQL Queries</h2>
+      ${soqlHtml}
+
+      <h2>✏️ DML Operations</h2>
+      ${dmlHtml}
+
+      <h2>🐞 Debug Statements</h2>
+      ${debugsHtml}
+    </div>
 
     <script>
       const vscode = acquireVsCodeApi();
@@ -552,6 +594,8 @@ export function renderAnalysisHtml(a: Analysis): string {
       });
 
       rehydrate();
+
+      ${tabSwitchingScript()}
 
       // Line-link and class-link delegation
       document.body.addEventListener('click', (e) => {

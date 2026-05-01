@@ -23,6 +23,9 @@ import {
   clearHistory,
   removeEntry,
 } from "./recentHistory";
+import { detectRecurringPatterns, RecurringPatterns } from "./recurringPatterns";
+import { linkAsyncChain, AsyncHistoryEntry, AsyncLink } from "./asyncTracer";
+import { RecurringIssuesProvider } from "./recurringIssuesView";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
@@ -30,6 +33,26 @@ let currentLogUri: vscode.Uri | undefined;
 let currentChat: ChatMessage[] = [];
 let diagnosticCollection: vscode.DiagnosticCollection | undefined;
 let recentProvider: RecentAnalysesProvider | undefined;
+let recurringProvider: RecurringIssuesProvider | undefined;
+
+function buildAsyncHistory(context: vscode.ExtensionContext): AsyncHistoryEntry[] {
+  return loadHistory(context).map((h) => ({
+    label: h.label,
+    savedAt: h.savedAt,
+    entryPoint: h.analysis.asyncEntryPoint,
+  }));
+}
+
+function computeRenderOptions(
+  context: vscode.ExtensionContext,
+  analysis: Analysis,
+): { recurring: RecurringPatterns; asyncLinks: AsyncLink[] } {
+  const history = loadHistory(context);
+  const recurring = detectRecurringPatterns(history);
+  const asyncHistory = buildAsyncHistory(context);
+  const asyncLinks = linkAsyncChain(analysis.asyncInvocations, asyncHistory);
+  return { recurring, asyncLinks };
+}
 
 function saveAnalysisToHistory(
   context: vscode.ExtensionContext,
@@ -38,6 +61,7 @@ function saveAnalysisToHistory(
 ): void {
   saveEntryToWorkspace(context, uri, analysis);
   recentProvider?.refresh();
+  recurringProvider?.refresh();
 }
 
 function severityToDiagnostic(s: Analysis["issues"][number]["severity"]): vscode.DiagnosticSeverity {
@@ -110,6 +134,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider(
       "apexDoctor.recent",
       recentProvider,
+    ),
+  );
+  recurringProvider = new RecurringIssuesProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(
+      "apexDoctor.recurring",
+      recurringProvider,
     ),
   );
   const sf = new SalesforceService();
@@ -318,7 +349,10 @@ export function activate(context: vscode.ExtensionContext) {
             Email: user.Email,
             ProfileName: user.Profile?.Name,
           };
-          currentPanel.webview.html = renderAnalysisHtml(currentAnalysis);
+          currentPanel.webview.html = renderAnalysisHtml(
+            currentAnalysis,
+            computeRenderOptions(context, currentAnalysis),
+          );
         })
         .catch(() => {
           /* silent */
@@ -464,7 +498,10 @@ export function activate(context: vscode.ExtensionContext) {
               Email: user.Email,
               ProfileName: user.Profile?.Name,
             };
-            currentPanel.webview.html = renderAnalysisHtml(currentAnalysis);
+            currentPanel.webview.html = renderAnalysisHtml(
+            currentAnalysis,
+            computeRenderOptions(context, currentAnalysis),
+          );
           })
           .catch(() => {
             /* silent */
@@ -628,7 +665,10 @@ function openAnalysisPanel(
   classResolver: ApexClassResolver,
 ) {
   if (currentPanel) {
-    currentPanel.webview.html = renderAnalysisHtml(analysis);
+    currentPanel.webview.html = renderAnalysisHtml(
+      analysis,
+      computeRenderOptions(context, analysis),
+    );
     currentPanel.reveal(vscode.ViewColumn.Beside);
     return;
   }
@@ -644,7 +684,10 @@ function openAnalysisPanel(
     },
   );
   currentPanel = panel;
-  panel.webview.html = renderAnalysisHtml(analysis);
+  panel.webview.html = renderAnalysisHtml(
+    analysis,
+    computeRenderOptions(context, analysis),
+  );
 
   const startInitialExplanation = async (focusIssue?: import("./analyzer").Issue) => {
     if (!currentAnalysis) { return; }
