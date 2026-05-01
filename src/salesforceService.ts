@@ -48,6 +48,29 @@ export interface UserInfo {
   Profile?: { Name: string };
 }
 
+export interface QueryPlan {
+  cardinality: number;
+  fields: string[];
+  leadingOperationType: string;
+  notes?: { description: string; tableEnumOrId: string }[];
+  relativeCost: number;
+  sobjectCardinality: number;
+  sobjectType: string;
+}
+
+export interface QueryPlanResponse {
+  plans: QueryPlan[];
+  sourceQuery: string;
+}
+
+export interface ClassCoverage {
+  className: string;
+  coveredLines: number[];
+  uncoveredLines: number[];
+  numLinesCovered: number;
+  numLinesUncovered: number;
+}
+
 export interface ApexLogRecord {
   Id: string;
   Application: string;
@@ -307,6 +330,59 @@ export class SalesforceService {
     const match = /07L[a-zA-Z0-9]{12,15}/.exec(base);
     return match?.[0];
   }
+  /**
+   * Run Salesforce's Query Plan tool against a SOQL string and return the
+   * parsed plan(s). Hits the REST endpoint `/services/data/vN/query/?explain=`
+   * via `sf api request rest`.
+   */
+  async explainQuery(
+    query: string,
+    apiVersion = "60.0",
+    targetOrg?: string,
+  ): Promise<QueryPlanResponse> {
+    const org = targetOrg || (await this.getDefaultOrg());
+    if (!org) {
+      throw new Error("No default Salesforce org found.");
+    }
+    const encoded = encodeURIComponent(query);
+    const apiPath = `/services/data/v${apiVersion}/query/?explain=${encoded}`;
+    const { stdout } = await execAsync(
+      `sf api request rest "${apiPath}" --target-org ${org}`,
+      { maxBuffer: 5 * 1024 * 1024 },
+    );
+    try {
+      return JSON.parse(stdout);
+    } catch (e: any) {
+      throw new Error(`Query Plan response could not be parsed: ${e.message}`);
+    }
+  }
+
+  /**
+   * Aggregate Apex code coverage by class. Returns one entry per Apex class
+   * with the coveredLines / uncoveredLines arrays from the org-wide aggregate.
+   */
+  async fetchCoverage(targetOrg?: string): Promise<ClassCoverage[]> {
+    const org = targetOrg || (await this.getDefaultOrg());
+    if (!org) {
+      throw new Error("No default Salesforce org found.");
+    }
+    const soql =
+      "SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered, Coverage " +
+      "FROM ApexCodeCoverageAggregate";
+    const { stdout } = await execAsync(
+      `sf data query --query "${soql}" --use-tooling-api --target-org ${org} --json`,
+      { maxBuffer: 20 * 1024 * 1024 },
+    );
+    const records = JSON.parse(stdout)?.result?.records ?? [];
+    return records.map((r: any) => ({
+      className: r?.ApexClassOrTrigger?.Name ?? "",
+      coveredLines: Array.isArray(r?.Coverage?.coveredLines) ? r.Coverage.coveredLines : [],
+      uncoveredLines: Array.isArray(r?.Coverage?.uncoveredLines) ? r.Coverage.uncoveredLines : [],
+      numLinesCovered: r?.NumLinesCovered ?? 0,
+      numLinesUncovered: r?.NumLinesUncovered ?? 0,
+    }));
+  }
+
   /** Retrieve an Apex class from the org into the local SFDX project. */
   async retrieveClass(className: string, targetOrg?: string): Promise<void> {
     const org = targetOrg || (await this.getDefaultOrg());

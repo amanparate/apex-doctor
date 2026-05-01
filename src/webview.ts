@@ -135,8 +135,8 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
   const soqlHtml = a.soql.length
     ? `${tableSearch("soql-table", "Filter SOQL by query, line, or row count…")}
-       <table id="soql-table" class="filterable"><thead><tr><th>#</th><th>Duration</th><th>Rows</th><th>Line</th><th>Query</th></tr></thead><tbody>
-        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? "-"}</td><td>${lineLink(q.lineNumber)}</td><td><code>${esc(q.query)}</code></td></tr>`).join("")}
+       <table id="soql-table" class="filterable"><thead><tr><th>#</th><th>Duration</th><th>Rows</th><th>Line</th><th>Query</th><th></th></tr></thead><tbody>
+        ${a.soql.map((q, i) => `<tr><td>${i + 1}</td><td>${fmt(q.durationMs)} ms</td><td>${q.rows ?? "-"}</td><td>${lineLink(q.lineNumber)}</td><td><code>${esc(q.query)}</code></td><td><button class="mini" onclick="queryPlan(${i})">🔎 Plan</button></td></tr>`).join("")}
       </tbody></table>`
     : `<p class="muted">No SOQL executed.</p>`;
 
@@ -487,6 +487,12 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
       function suggestFix(idx) {
         vscode.postMessage({ command: 'suggestFix', index: idx });
+      }
+
+      const __soqlQueries = ${JSON.stringify(a.soql.map((q) => q.query))};
+      function queryPlan(idx) {
+        const query = __soqlQueries[idx];
+        if (query) { vscode.postMessage({ command: 'queryPlan', query }); }
       }
 
       function askLog() {

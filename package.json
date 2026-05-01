@@ -2,7 +2,7 @@
   "name": "apex-doctor",
   "displayName": "Apex Doctor",
   "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "amanparate",
   "author": {
     "name": "Aman Parate",
@@ -51,7 +51,10 @@
       { "command": "apexDoctor.openRecent", "title": "Open Recent Analysis", "category": "Apex Doctor" },
       { "command": "apexDoctor.clearRecent", "title": "Clear Recent Analyses", "category": "Apex Doctor", "icon": "$(clear-all)" },
       { "command": "apexDoctor.removeRecent", "title": "Remove from Recent", "category": "Apex Doctor", "icon": "$(close)" },
-      { "command": "apexDoctor.manageTraceFlags", "title": "Manage Trace Flags", "category": "Apex Doctor" }
+      { "command": "apexDoctor.manageTraceFlags", "title": "Manage Trace Flags", "category": "Apex Doctor" },
+      { "command": "apexDoctor.refreshCoverage", "title": "Refresh Test Coverage", "category": "Apex Doctor" },
+      { "command": "apexDoctor.toggleCoverage", "title": "Toggle Coverage Overlay", "category": "Apex Doctor" },
+      { "command": "apexDoctor.queryPlan", "title": "Run SOQL Query Plan…", "category": "Apex Doctor" }
     ],
     "views": {
       "explorer": [
@@ -80,6 +83,9 @@
         { "command": "apexDoctor.compareLogs" },
         { "command": "apexDoctor.clearRecent" },
         { "command": "apexDoctor.manageTraceFlags" },
+        { "command": "apexDoctor.refreshCoverage" },
+        { "command": "apexDoctor.toggleCoverage" },
+        { "command": "apexDoctor.queryPlan" },
         { "command": "apexDoctor.openRecent", "when": "false" },
         { "command": "apexDoctor.removeRecent", "when": "false" }
       ]

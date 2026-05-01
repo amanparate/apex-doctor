@@ -10,6 +10,8 @@
 
 Paste any Salesforce Apex debug log into VS Code, right-click, and get an instant, structured breakdown:
 
+- 🔎 **SOQL Query Plan** — every SOQL row has a "Plan" button. One click runs Salesforce's Query Plan tool, surfaces selectivity, and warns about full table scans.
+- 🧪 **Test coverage overlay** — when a `.cls` is open, see covered / uncovered lines directly in the gutter, with a status-bar % for the class.
 - 💬 **Ask the Log (natural language)** — _"show me SOQL that returned > 500 rows"_, _"methods after the exception"_, _"debugs from AccountHandler"_. LLM picks the right array; we hydrate the matched rows locally so nothing is fabricated.
 - 🔧 **Suggest fix — one-click refactor with diff preview** — for SOQL-in-loop, missing LIMIT, and more. Templated transforms when a pattern matches; AI fallback otherwise. Always preview-then-apply via VS Code's diff view.
 - 🔥 **CPU Profiler** — self-time attribution, hot path, single-bottleneck callout. The first Apex tool that tells you _where_ the CPU actually went, not just which method took longest.
@@ -34,6 +36,35 @@ Paste any Salesforce Apex debug log into VS Code, right-click, and get an instan
 - 🔀 **Compare two logs** — side-by-side diff for before / after optimisations
 - 🗂️ **Recent analyses** — last 10 analyses persisted per workspace, one click to reopen
 - 🤖 **AI root-cause + follow-up chat** — OpenRouter, Anthropic, OpenAI, or Google Gemini
+
+---
+
+## 🔎 SOQL Query Plan integration
+
+**New in v0.7.0** — every SOQL row in the Tables tab now has a **🔎 Plan** button. One click and Apex Doctor runs the query through Salesforce's Query Plan tool (`/services/data/vN/query/?explain=`) and shows a dedicated panel:
+
+- **Verdict banner** — 🟢 selective / 🟡 marginal / 🔴 full-table scan
+- **Leading plan** — the one Salesforce will actually use, with relative cost, cardinality, fields used, and the indexed sObject
+- **Alternative plans** — every plan Salesforce considered, sorted by cost
+- **Notes from Salesforce** — e.g. "WHERE field is not selective", "no relevant index", etc.
+
+Until now you had to manually paste each query into the Setup → Query Plan Tool. Apex Doctor already had every SOQL — running the plan automatically per query is one click.
+
+You can also run an ad-hoc query at any time via **`Apex Doctor: Run SOQL Query Plan…`** from the Command Palette.
+
+---
+
+## 🧪 Test coverage overlay (gutter)
+
+**New in v0.7.0** — open any `.cls` or `.trigger` file and Apex Doctor renders the org's actual test coverage directly in the gutter:
+
+- 🟢 **Green** — line is covered by at least one test class
+- 🔴 **Red** — line is uncovered
+- **Status bar** — shows the per-class coverage percentage (click to toggle the overlay)
+
+Sourced from `ApexCodeCoverageAggregate` in your default org. Run **`Apex Doctor: Refresh Test Coverage`** once and the data is cached in workspace state — overlays apply automatically as you open files. Toggle visibility any time via **`Apex Doctor: Toggle Coverage Overlay`** or by clicking the status-bar item.
+
+Unlike Salesforce's built-in coverage report, this is **inline in the editor** — exactly where you're writing the code.
 
 ---
 

@@ -5,6 +5,14 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-05-01
+
+### Added
+
+- **🔎 SOQL Query Plan integration** — every SOQL row in the Tables tab now has a "Plan" button. One click runs the query through Salesforce's Query Plan tool (`/services/data/vN/query/?explain=`) and renders the result in a side panel: leading-operation type, relative cost, cardinality, considered alternative plans, and any selectivity notes from Salesforce. A verdict banner calls out full-table-scans (`🔴`) vs selective queries (`🟢`). Also exposed via the `Apex Doctor: Run SOQL Query Plan…` command for ad-hoc queries.
+- **🧪 Test coverage overlay** — when a `.cls` or `.trigger` file is open, Apex Doctor draws covered / uncovered lines as subtle green / red gutter icons + line-background tints, sourced from `ApexCodeCoverageAggregate` in your default org. A status-bar item shows the per-class coverage percentage. New commands: `Refresh Test Coverage` (queries the org and caches in workspaceState) and `Toggle Coverage Overlay`. Cached coverage stays available offline; click the status-bar item to toggle.
+- New `SalesforceService` methods: `explainQuery()` (Tooling REST `?explain=` endpoint via `sf api request rest`) and `fetchCoverage()` (`ApexCodeCoverageAggregate` Tooling API).
+
 ## [0.6.0] — 2026-05-01
 
 ### Added

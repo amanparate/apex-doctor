@@ -28,6 +28,8 @@ import { linkAsyncChain, AsyncHistoryEntry, AsyncLink } from "./asyncTracer";
 import { RecurringIssuesProvider } from "./recurringIssuesView";
 import { suggestFixForIssue, FixDiffContentProvider } from "./fixSuggestions";
 import { buildNlQueryPrompt, parseNlQueryResponse, NlQueryResult } from "./nlQuery";
+import { CoverageProvider } from "./coverageProvider";
+import { showQueryPlan } from "./queryPlanView";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
@@ -158,6 +160,8 @@ export function activate(context: vscode.ExtensionContext) {
   const streaming = new StreamingService(sf);
   const streamView = new StreamView();
   const traceFlagView = new TraceFlagView();
+  const coverageProvider = new CoverageProvider(context, sf);
+  context.subscriptions.push({ dispose: () => coverageProvider.dispose() });
 
   const refreshTraceFlags = async () => {
     try {
@@ -601,6 +605,34 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  const refreshCoverageCmd = vscode.commands.registerCommand(
+    "apexDoctor.refreshCoverage",
+    async () => {
+      try {
+        await coverageProvider.refresh();
+      } catch (e: any) {
+        vscode.window.showErrorMessage(`Coverage refresh failed: ${e.message}`);
+      }
+    },
+  );
+
+  const toggleCoverageCmd = vscode.commands.registerCommand(
+    "apexDoctor.toggleCoverage",
+    () => coverageProvider.toggle(),
+  );
+
+  const queryPlanCmd = vscode.commands.registerCommand(
+    "apexDoctor.queryPlan",
+    async (queryArg?: string) => {
+      const query = queryArg ?? (await vscode.window.showInputBox({
+        prompt: "Paste a SOQL query to run through the Query Plan tool",
+        placeHolder: "SELECT Id FROM Account WHERE Industry = 'Tech'",
+      }));
+      if (!query) { return; }
+      await showQueryPlan(query, sf);
+    },
+  );
+
   context.subscriptions.push(
     analyzeCmd,
     fetchLogCmd,
@@ -612,6 +644,9 @@ export function activate(context: vscode.ExtensionContext) {
     clearRecentCmd,
     removeRecentCmd,
     traceFlagsCmd,
+    refreshCoverageCmd,
+    toggleCoverageCmd,
+    queryPlanCmd,
   );
 }
 
@@ -769,6 +804,10 @@ function openAnalysisPanel(
           await suggestFixForIssue(issue, msg.classNameHint, ai, classResolver);
         },
       );
+    } else if (msg.command === "queryPlan") {
+      const query: string = (msg.query || "").trim();
+      if (!query) { return; }
+      await showQueryPlan(query, sf);
     } else if (msg.command === "askLog") {
       if (!currentAnalysis) { return; }
       const question: string = (msg.text || "").trim();
