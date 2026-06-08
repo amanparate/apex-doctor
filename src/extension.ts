@@ -9,7 +9,7 @@ import { StreamView } from "./streamView";
 import { ApexClassResolver } from "./apexClassResolver";
 import { CompareService } from "./compareService";
 import { renderComparisonHtml, buildComparisonMarkdown } from "./compareView";
-import { TraceFlagView } from "./traceFlagView";
+import { TraceFlagView, TracePreset } from "./traceFlagView";
 import {
   SalesforceService,
   ApexLogRecord,
@@ -27,6 +27,8 @@ import { detectRecurringPatterns, RecurringPatterns } from "./recurringPatterns"
 import { linkAsyncChain, AsyncHistoryEntry, AsyncLink } from "./asyncTracer";
 import { RecurringIssuesProvider } from "./recurringIssuesView";
 import { suggestFixForIssue, FixDiffContentProvider } from "./fixSuggestions";
+import { ApexFixActionProvider, APPLY_FIX_COMMAND } from "./codeActions";
+import { CurrentAnalysisProvider } from "./currentAnalysisView";
 import { buildNlQueryPrompt, parseNlQueryResponse, NlQueryResult } from "./nlQuery";
 import { CoverageProvider } from "./coverageProvider";
 import { showQueryPlan } from "./queryPlanView";
@@ -44,6 +46,7 @@ let currentChat: ChatMessage[] = [];
 let diagnosticCollection: vscode.DiagnosticCollection | undefined;
 let recentProvider: RecentAnalysesProvider | undefined;
 let recurringProvider: RecurringIssuesProvider | undefined;
+let currentAnalysisProvider: CurrentAnalysisProvider | undefined;
 
 function buildAsyncHistory(context: vscode.ExtensionContext): AsyncHistoryEntry[] {
   return loadHistory(context).map((h) => ({
@@ -153,6 +156,16 @@ export function activate(context: vscode.ExtensionContext) {
       recurringProvider,
     ),
   );
+  currentAnalysisProvider = new CurrentAnalysisProvider(() => currentAnalysis);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(
+      "apexDoctor.currentAnalysis",
+      currentAnalysisProvider,
+    ),
+    vscode.commands.registerCommand("apexDoctor.jumpToLogLine", (line: number) =>
+      jumpToLogLine(line),
+    ),
+  );
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(
       "apexdoctor-fix",
@@ -185,57 +198,85 @@ export function activate(context: vscode.ExtensionContext) {
 
   traceFlagView.onRefresh(refreshTraceFlags);
 
-  traceFlagView.onNewTrace(async () => {
+  const PRESET_KEY = "apexDoctor.lastTracePreset";
+  // Surface any saved preset when the panel opens.
+  traceFlagView.setLastPreset(context.workspaceState.get<TracePreset>(PRESET_KEY));
+
+  // Shared create routine used by both "Trace another user" and "Re-trace last user".
+  const createTrace = async (
+    user: { Id: string; Name: string },
+    debugLevel: { Id: string; DeveloperName: string },
+    minutes: number,
+  ) => {
+    traceFlagView.setBusy(true, `Creating trace flag for ${user.Name}…`);
     try {
-      const user = await pickUser(sf);
-      if (!user) {
-        return;
-      }
-      const minutes = await pickDuration();
-      if (!minutes) {
-        return;
-      }
-      const debugLevel = await pickDebugLevel(sf);
-      if (!debugLevel) {
-        return;
-      }
-      traceFlagView.setBusy(true, `Creating trace flag for ${user.Name}…`);
-      try {
-        await sf.createTraceFlag(user.Id, debugLevel.Id, minutes);
-        vscode.window.showInformationMessage(
-          `Now tracing ${user.Name} for ${formatMinutes(minutes)}. Watch the Live Stream for their logs.`,
+      await sf.createTraceFlag(user.Id, debugLevel.Id, minutes);
+      const preset: TracePreset = {
+        userId: user.Id,
+        userName: user.Name,
+        debugLevelId: debugLevel.Id,
+        debugLevelName: debugLevel.DeveloperName,
+        minutes,
+      };
+      await context.workspaceState.update(PRESET_KEY, preset);
+      traceFlagView.setLastPreset(preset);
+      vscode.window.showInformationMessage(
+        `Now tracing ${user.Name} for ${formatMinutes(minutes)}. Watch the Live Stream for their logs.`,
+      );
+    } catch (e: any) {
+      const msg = String(e.message || e);
+      if (/DUPLICATE_VALUE|already.*active/i.test(msg)) {
+        const choice = await vscode.window.showWarningMessage(
+          `${user.Name} already has an active trace flag. Extend it by 1 hour instead?`,
+          "Extend by 1h",
+          "Cancel",
         );
-      } catch (e: any) {
-        const msg = String(e.message || e);
-        // Detect duplicate-trace error and offer to extend the existing one
-        if (/DUPLICATE_VALUE|already.*active/i.test(msg)) {
-          const choice = await vscode.window.showWarningMessage(
-            `${user.Name} already has an active trace flag. Extend it by 1 hour instead?`,
-            "Extend by 1h",
-            "Cancel",
-          );
-          if (choice === "Extend by 1h") {
-            const flags = await sf.listActiveTraceFlags();
-            const existing = flags.find((f) => f.TracedEntityId === user.Id);
-            if (existing) {
-              await sf.extendTraceFlag(
-                existing.Id,
-                existing.ExpirationDate,
-                60,
-              );
-              vscode.window.showInformationMessage(
-                `Extended trace for ${user.Name} by 1 hour.`,
-              );
-            }
+        if (choice === "Extend by 1h") {
+          const flags = await sf.listActiveTraceFlags();
+          const existing = flags.find((f) => f.TracedEntityId === user.Id);
+          if (existing) {
+            await sf.extendTraceFlag(existing.Id, existing.ExpirationDate, 60);
+            vscode.window.showInformationMessage(
+              `Extended trace for ${user.Name} by 1 hour.`,
+            );
           }
-        } else {
-          vscode.window.showErrorMessage(`Trace flag creation failed: ${msg}`);
         }
+      } else {
+        vscode.window.showErrorMessage(`Trace flag creation failed: ${msg}`);
       }
     } finally {
       traceFlagView.setBusy(false);
       refreshTraceFlags();
     }
+  };
+
+  traceFlagView.onNewTrace(async () => {
+    const user = await pickUser(sf);
+    if (!user) {
+      return;
+    }
+    const minutes = await pickDuration();
+    if (!minutes) {
+      return;
+    }
+    const debugLevel = await pickDebugLevel(sf);
+    if (!debugLevel) {
+      return;
+    }
+    await createTrace(user, debugLevel, minutes);
+  });
+
+  traceFlagView.onReTraceLast(async () => {
+    const preset = context.workspaceState.get<TracePreset>(PRESET_KEY);
+    if (!preset) {
+      vscode.window.showInformationMessage("No previous trace to repeat yet.");
+      return;
+    }
+    await createTrace(
+      { Id: preset.userId, Name: preset.userName },
+      { Id: preset.debugLevelId, DeveloperName: preset.debugLevelName },
+      preset.minutes,
+    );
   });
 
   traceFlagView.onDelete(async (flagId) => {
@@ -674,8 +715,37 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
+  // Shared fix entry point — used by both the webview "Suggest fix" button and
+  // the editor CodeAction lightbulb.
+  const applyIssueFixCmd = vscode.commands.registerCommand(
+    APPLY_FIX_COMMAND,
+    async (issueIndex: number, classNameHint?: string) => {
+      if (!currentAnalysis) { return; }
+      const issue = currentAnalysis.issues[issueIndex];
+      if (!issue) { return; }
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: "Generating fix…" },
+        async () => {
+          await suggestFixForIssue(issue, classNameHint, ai, classResolver);
+        },
+      );
+    },
+  );
+
+  // CodeAction provider: lightbulb quick-fixes on .cls / .trigger files.
+  const fixActionProvider = vscode.languages.registerCodeActionsProvider(
+    [
+      { scheme: "file", pattern: "**/*.cls" },
+      { scheme: "file", pattern: "**/*.trigger" },
+    ],
+    new ApexFixActionProvider(() => currentAnalysis),
+    { providedCodeActionKinds: ApexFixActionProvider.providedKinds },
+  );
+
   // Show/hide the "Run with Apex Doctor" status-bar item based on the active editor
   context.subscriptions.push(
+    applyIssueFixCmd,
+    fixActionProvider,
     vscode.window.onDidChangeActiveTextEditor(() => refreshStatusBarVisibility()),
     { dispose: () => disposeStatusBarItem() },
   );
@@ -745,6 +815,7 @@ async function analyzeText(
       currentChat = [];
       publishDiagnostics(uri, text, analysis);
       saveAnalysisToHistory(context, uri, analysis);
+      currentAnalysisProvider?.refresh();
       openAnalysisPanel(context, analysis, ai, sf, classResolver);
     },
   );
@@ -844,15 +915,18 @@ function openAnalysisPanel(
       vscode.window.showInformationMessage(
         "Analysis copied to clipboard as Markdown.",
       );
+    } else if (msg.command === "exportCsv") {
+      const csv: string = msg.csv || "";
+      if (!csv) { return; }
+      await vscode.env.clipboard.writeText(csv);
+      vscode.window.showInformationMessage(
+        `${(msg.label || "Table").toString().toUpperCase()} copied to clipboard as CSV.`,
+      );
     } else if (msg.command === "suggestFix") {
-      if (!currentAnalysis) { return; }
-      const issue = currentAnalysis.issues[msg.index];
-      if (!issue) { return; }
-      await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: "Generating fix…" },
-        async () => {
-          await suggestFixForIssue(issue, msg.classNameHint, ai, classResolver);
-        },
+      await vscode.commands.executeCommand(
+        APPLY_FIX_COMMAND,
+        msg.index,
+        msg.classNameHint,
       );
     } else if (msg.command === "queryPlan") {
       const query: string = (msg.query || "").trim();

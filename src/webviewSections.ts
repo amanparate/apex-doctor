@@ -1,6 +1,8 @@
 import { Analysis } from "./analyzer";
 import { MethodAggregate } from "./profiler";
+import { HeapAllocator, formatBytes } from "./heapProfiler";
 import { TriggerPhaseGroup } from "./triggerOrder";
+import { FlowExecution } from "./flowAnalysis";
 import { AsyncInvocation, AsyncLink } from "./asyncTracer";
 import { DebugLevelRecommendation } from "./debugLevelAdvisor";
 import { RecurringPatterns } from "./recurringPatterns";
@@ -89,6 +91,87 @@ export function renderCpuProfiler(a: Analysis): string {
       <thead><tr><th>Method</th><th class="num">Self ms</th><th class="num">Total ms</th><th class="num">Calls</th><th class="num">% of total</th><th>Bar</th></tr></thead>
       <tbody>${profile.byTotal.slice(0, 20).map(aggregateRow).join("")}</tbody>
     </table>
+  `;
+}
+
+export function renderHeapProfiler(a: Analysis): string {
+  const heap = a.heapProfile;
+  if (!heap.allocationCount) {
+    return `<p class="muted">No heap allocations captured. Heap attribution needs <code>APEX_PROFILING</code> at <code>FINEST</code> (or a debug level that emits <code>HEAP_ALLOCATE</code>).</p>`;
+  }
+
+  const top = heap.topAllocator;
+  const peakLine =
+    heap.peakHeapBytes !== undefined && heap.heapLimitBytes
+      ? `<div class="muted small">Peak live heap: ${formatBytes(heap.peakHeapBytes)} of ${formatBytes(heap.heapLimitBytes)} (${(heap.pctOfLimit ?? 0).toFixed(0)}%)</div>`
+      : "";
+  const headline = top
+    ? `<div class="hot-leaf">
+         <div class="muted">Biggest allocator — ${pct(top.pctOfTotal)} of all allocated bytes</div>
+         <div class="hot-leaf-name">${classLink(top.name, top.lineNumber)}</div>
+         <div class="muted small">${formatBytes(top.bytes)} across ${top.count} allocation${top.count === 1 ? "" : "s"}</div>
+         ${peakLine}
+       </div>`
+    : "";
+
+  const row = (m: HeapAllocator) => `
+    <tr>
+      <td>${classLink(m.name, m.lineNumber)}</td>
+      <td class="num">${formatBytes(m.bytes)}</td>
+      <td class="num">${m.count}</td>
+      <td class="num">${pct(m.pctOfTotal)}</td>
+      <td>
+        <div class="bar-cell">
+          <div class="bar-fill" style="width:${Math.min(100, m.pctOfTotal).toFixed(1)}%"></div>
+        </div>
+      </td>
+    </tr>`;
+
+  return `
+    <h2>Heap / Memory</h2>
+    <p class="muted small">Total allocated: <strong>${formatBytes(heap.totalAllocatedBytes)}</strong> across ${heap.allocationCount} allocations. Bytes are attributed to the enclosing method.</p>
+    ${headline}
+    <h3>Biggest allocators</h3>
+    <table class="profile-table">
+      <thead><tr><th>Allocator</th><th class="num">Bytes</th><th class="num">Allocs</th><th class="num">% of total</th><th>Bar</th></tr></thead>
+      <tbody>${heap.byAllocator.slice(0, 20).map(row).join("")}</tbody>
+    </table>
+  `;
+}
+
+export function renderFlows(flows: FlowExecution[]): string {
+  if (!flows.length) {
+    return "";
+  }
+  return `
+    <h2>Flows &amp; Process Builder</h2>
+    <p class="muted small">Flow interviews with per-element timing. Elements that ran many times are likely loop-bound.</p>
+    ${flows
+      .map(
+        (f) => `
+      <div class="trigger-phase">
+        <div class="phase-header">
+          <strong>${escapeHtml(f.flowName)}</strong>
+          <span class="muted small">${fmt(f.totalDurationMs)} ms total · ${f.elements.length} element${f.elements.length === 1 ? "" : "s"}</span>
+        </div>
+        <ol class="trigger-list">
+          ${f.elements
+            .map((e) => {
+              const isSlow = e.name === f.slowestName && f.elements.length > 1;
+              const looped = f.loopedElements.includes(e.name);
+              return `<li class="trigger-row ${isSlow ? "trigger-slow" : ""}">
+                <span class="trigger-name"><code>${escapeHtml(e.name)}</code></span>
+                <span class="muted small">${escapeHtml(e.elementType)} · ${fmt(e.durationMs)} ms${e.executions > 1 ? ` · ×${e.executions}` : ""}</span>
+                ${e.dbBearing ? `<span class="recursive-pill">DB</span>` : ""}
+                ${looped ? `<span class="slow-pill">in loop</span>` : ""}
+              </li>`;
+            })
+            .join("")}
+        </ol>
+      </div>
+    `,
+      )
+      .join("")}
   `;
 }
 

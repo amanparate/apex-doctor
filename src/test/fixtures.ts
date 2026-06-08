@@ -100,3 +100,46 @@ export const HOT_PATH_LOG = [
   "12:00:00.000 (920000)|METHOD_EXIT|[10]|01p|AccountHandler.processAccounts()",
   "12:00:00.000 (1000000)|EXECUTION_FINISHED",
 ].join("\n");
+
+// Heap allocations attributed to two methods; bigBuilder allocates far more.
+export const HEAP_LOG = [
+  "52.0 APEX_CODE,FINEST;APEX_PROFILING,FINEST;",
+  "12:00:00.000 (0)|EXECUTION_STARTED",
+  "12:00:00.000 (10000)|METHOD_ENTRY|[10]|01p|AccountHandler.bigBuilder()",
+  "12:00:00.000 (11000)|HEAP_ALLOCATE|[11]|Bytes:5000",
+  "12:00:00.000 (12000)|HEAP_ALLOCATE|[12]|Bytes:4000",
+  "12:00:00.000 (13000)|METHOD_EXIT|[10]|01p|AccountHandler.bigBuilder()",
+  "12:00:00.000 (14000)|METHOD_ENTRY|[20]|01p|AccountHandler.smallHelper()",
+  "12:00:00.000 (15000)|HEAP_ALLOCATE|[21]|Bytes:200",
+  "12:00:00.000 (16000)|METHOD_EXIT|[20]|01p|AccountHandler.smallHelper()",
+  "12:00:00.000 (1000000)|EXECUTION_FINISHED",
+].join("\n");
+
+// A flow whose recordLookups element runs many times (loop-bound).
+export const FLOW_LOG = [
+  "52.0 APEX_CODE,DEBUG;",
+  "12:00:00.000 (0)|EXECUTION_STARTED",
+  "12:00:00.000 (1000)|FLOW_START_INTERVIEWS_BEGIN|1|MyAccountFlow",
+  ...Array.from({ length: 6 }, (_, i) => {
+    const t = 2000 + i * 1000;
+    return [
+      `12:00:00.000 (${t})|FLOW_ELEMENT_BEGIN|INT1|recordLookups|Get_Contacts`,
+      `12:00:00.000 (${t + 400})|FLOW_ELEMENT_END|INT1|recordLookups|Get_Contacts`,
+    ].join("\n");
+  }),
+  "12:00:00.000 (20000)|FLOW_ELEMENT_BEGIN|INT1|assignments|Set_Flag",
+  "12:00:00.000 (20100)|FLOW_ELEMENT_END|INT1|assignments|Set_Flag",
+  "12:00:00.000 (1000000)|EXECUTION_FINISHED",
+].join("\n");
+
+// Minimal SFDX-style class text for code-action templating tests.
+export const ACCOUNT_HANDLER_CLS = [
+  "public class AccountHandler {",
+  "  public static void processAccounts(List<Account> accounts) {",
+  "    for (Account a : accounts) {",
+  "      Contract c = [SELECT Id FROM Contract WHERE AccountId = :a.Id];",
+  "      System.debug(c);",
+  "    }",
+  "  }",
+  "}",
+].join("\n");

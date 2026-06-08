@@ -2,7 +2,7 @@
   "name": "apex-doctor",
   "displayName": "Apex Doctor",
   "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "publisher": "amanparate",
   "author": {
     "name": "Aman Parate",
@@ -133,18 +133,49 @@
         "category": "Apex Doctor"
       }
     ],
-    "views": {
-      "explorer": [
+    "viewsContainers": {
+      "activitybar": [
         {
-          "id": "apexDoctor.recent",
-          "name": "Apex Doctor: Recent Logs"
-        },
-        {
-          "id": "apexDoctor.recurring",
-          "name": "Apex Doctor: Recurring Issues"
+          "id": "apexDoctor",
+          "title": "Apex Doctor",
+          "icon": "images/sidebar-icon.svg"
         }
       ]
     },
+    "views": {
+      "apexDoctor": [
+        {
+          "id": "apexDoctor.currentAnalysis",
+          "name": "Current Analysis"
+        },
+        {
+          "id": "apexDoctor.recent",
+          "name": "Recent Logs"
+        },
+        {
+          "id": "apexDoctor.recurring",
+          "name": "Recurring Issues"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "apexDoctor.analyze",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "apexDoctor.fetchLog",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f"
+      },
+      {
+        "command": "apexDoctor.manageTraceFlags",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t"
+      }
+    ],
     "menus": {
       "editor/context": [
         {

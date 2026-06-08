@@ -130,6 +130,21 @@ export function generateInsights(a: Analysis): Insight[] {
     });
   }
 
+  // --- Rule: Heap pressure ---
+  const heap = a.heapProfile;
+  if (heap && heap.pctOfLimit !== undefined && heap.pctOfLimit >= 60) {
+    const allocator = heap.topAllocator;
+    insights.push({
+      icon: '🧠',
+      severity: heap.pctOfLimit >= 85 ? 'critical' : 'warning',
+      title: `Heap reached ${heap.pctOfLimit.toFixed(0)}% of the limit`,
+      detail: allocator
+        ? `Biggest allocator is ${allocator.name}. Reduce in-memory collection sizes, null out references when done, or move heavy work to an async context (which gets a larger heap).`
+        : `Reduce in-memory collection sizes or move heavy work to an async context for a larger heap.`,
+      metric: allocator ? `${allocator.name} · ${(allocator.pctOfTotal).toFixed(0)}% of allocations` : undefined,
+    });
+  }
+
   // --- Rule: CPU-bound ---
   const interactiveMs = soqlMs + dmlMs + calloutMs;
   if (pct(interactiveMs) < 30 && totalMs > 100) {

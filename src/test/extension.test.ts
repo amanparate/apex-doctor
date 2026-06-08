@@ -7,6 +7,8 @@ import { linkAsyncChain, AsyncHistoryEntry } from "../asyncTracer";
 import { tryTemplatedFix } from "../fixTemplates";
 import { parseNlQueryResponse } from "../nlQuery";
 import { diffEvents } from "../lineDiff";
+import { buildHeapProfile, formatBytes } from "../heapProfiler";
+import { extractFlows } from "../flowAnalysis";
 import {
   NORMAL_LOG,
   SOQL_IN_LOOP_LOG,
@@ -17,6 +19,9 @@ import {
   TRIGGER_ORDER_LOG,
   ASYNC_PARENT_LOG,
   HOT_PATH_LOG,
+  HEAP_LOG,
+  FLOW_LOG,
+  ACCOUNT_HANDLER_CLS,
 } from "./fixtures";
 
 const parser = new ApexLogParser();
@@ -231,7 +236,9 @@ suite("Debug-level recommendations", () => {
 suite("Recurring patterns", () => {
   test("flags an issue that appears 3+ times across analyses", () => {
     const a1 = doctor.analyze(parser.parse(SOQL_IN_LOOP_LOG));
-    const baseTime = new Date("2026-04-30T10:00:00Z").getTime();
+    // Use timestamps within the recurring-pattern window (default 7 days),
+    // relative to now so the test doesn't rot as the calendar advances.
+    const baseTime = Date.now() - 60 * 60_000;
     const history = [0, 1, 2, 3].map((i) => ({
       id: `id${i}`,
       label: `log${i}.log`,
@@ -413,5 +420,72 @@ suite("Line-level log diff", () => {
     // SOQL_EXECUTE_END isn't in our significant set, but SOQL_EXECUTE_BEGIN is.
     // For SOQL_EXECUTE_BEGIN the rowcount isn't on it — so this stays "same".
     assert.ok(diff.stats.same >= 1);
+  });
+});
+
+suite("Heap profiler", () => {
+  test("attributes bytes to the enclosing method and ranks allocators", () => {
+    const a = doctor.analyze(parser.parse(HEAP_LOG));
+    const heap = a.heapProfile;
+    assert.strictEqual(heap.allocationCount, 3);
+    assert.strictEqual(heap.totalAllocatedBytes, 9200);
+    assert.ok(heap.topAllocator, "expected a top allocator");
+    assert.match(heap.topAllocator!.name, /bigBuilder/);
+    assert.strictEqual(heap.topAllocator!.bytes, 9000);
+  });
+
+  test("buildHeapProfile surfaces governor peak-heap pct when provided", () => {
+    const events = parser.parse(HEAP_LOG).events;
+    const profile = buildHeapProfile(events, { used: 4_800_000, limit: 6_000_000 });
+    assert.ok(profile.pctOfLimit !== undefined);
+    assert.ok(profile.pctOfLimit! >= 79 && profile.pctOfLimit! <= 81);
+  });
+
+  test("formatBytes renders B / KB / MB", () => {
+    assert.strictEqual(formatBytes(512), "512 B");
+    assert.match(formatBytes(2048), /KB$/);
+    assert.match(formatBytes(3 * 1024 * 1024), /MB$/);
+  });
+});
+
+suite("Flow analysis", () => {
+  test("groups elements by flow and flags loop-bound elements", () => {
+    const flows = extractFlows(parser.parse(FLOW_LOG).events);
+    assert.strictEqual(flows.length, 1);
+    const flow = flows[0];
+    assert.strictEqual(flow.flowName, "MyAccountFlow");
+    const lookup = flow.elements.find((e) => e.name === "Get_Contacts");
+    assert.ok(lookup, "expected the Get_Contacts element");
+    assert.strictEqual(lookup!.executions, 6);
+    assert.ok(lookup!.dbBearing, "recordLookups should be DB-bearing");
+    assert.ok(flow.loopedElements.includes("Get_Contacts"));
+  });
+
+  test("raises a Flow Element in Loop issue in the analysis", () => {
+    const a = doctor.analyze(parser.parse(FLOW_LOG));
+    const issue = a.issues.find((i) => i.type === "Flow Element in Loop");
+    assert.ok(issue, "expected a flow-in-loop issue");
+  });
+});
+
+suite("Code actions (templated fix gating)", () => {
+  test("a SOQL-in-loop issue yields a templated bulkify fix on the matching class text", () => {
+    const a = doctor.analyze(parser.parse(SOQL_IN_LOOP_LOG));
+    // Find the SOQL-in-loop issue; craft one pointed at line 4 of the sample class.
+    const issue = {
+      severity: "error" as const,
+      type: "SOQL in Loop",
+      message: "Same query executed 6 times",
+      lineNumber: 4,
+      timestamp: "12:00:00.000",
+    };
+    const fix = tryTemplatedFix({
+      issue,
+      fileText: ACCOUNT_HANDLER_CLS,
+      filePath: "AccountHandler.cls",
+    });
+    assert.ok(fix, "expected the bulkify code-action template to fire");
+    assert.match(fix!.newFileText, /IN\s+:/);
+    void a;
   });
 });

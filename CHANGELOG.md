@@ -5,6 +5,23 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-06-08
+
+### Added
+
+- **🧠 Heap / memory profiler** — a new section in the Profiler tab that reads `HEAP_ALLOCATE` events, attributes allocated bytes to the enclosing method, and ranks the biggest allocators. Surfaces total allocated bytes, the single biggest allocator, and (when the governor "Maximum heap size" metric is present) peak live-heap as a % of the limit. A heap-pressure issue + insight fire at ≥ 80% / ≥ 60% of the limit. The natural twin of the CPU profiler.
+- **🌊 Flow / Process Builder analysis** — parses `FLOW_*` events into per-flow element timelines with per-element timing, marks DB-bearing elements, and flags "Flow element in loop" when an element runs many times. Shown in the Overview tab beside Trigger Order.
+- **🛠️ CodeAction quick-fixes** — lightbulb fixes directly on `.cls` / `.trigger` files for issues from the most recent analysis (e.g. SOQL-in-loop → bulkify). Only offered when a templated transform actually applies to the open file, so there are no false lightbulbs. Reuses the existing templated-fix + diff-preview flow.
+- **🩺 Activity-bar sidebar** — Apex Doctor now has its own activity-bar icon containing three views: **Current Analysis** (a live outline of the open log — issues, CPU hotspot, biggest allocator, summary; click an issue to jump to its line), **Recent Logs**, and **Recurring Issues** (moved out of the Explorer).
+- **⌨️ Keyboard shortcuts** — `Ctrl/Cmd+Alt+A` (Analyse), `Ctrl/Cmd+Alt+F` (Fetch Log), `Ctrl/Cmd+Alt+T` (Manage Trace Flags).
+- **↻ Trace-flag presets** — the Trace Flag Manager remembers your last (user · debug level · duration) and offers a one-click **Re-trace last user** button.
+- **⤓ CSV export** — per-table "CSV" buttons on the SOQL, DML, and Methods tables copy the rows to the clipboard as CSV.
+- **GitHub Actions CI** — `ci.yml` runs type-check + lint + tests (under `xvfb`) + production package on every push/PR; `release.yml` attaches the built VSIX to each `v*` tag's GitHub Release.
+
+### Tests
+
+- 37 passing (was 31): heap attribution + byte formatting, flow grouping + loop detection, and code-action fix gating. Also hardened the recurring-patterns test against calendar drift.
+
 ## [0.9.1] — 2026-05-02
 
 ### Fixed

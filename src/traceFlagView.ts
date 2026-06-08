@@ -1,10 +1,20 @@
 import * as vscode from 'vscode';
 import { TraceFlagInfo } from './salesforceService';
 
+export interface TracePreset {
+  userId: string;
+  userName: string;
+  debugLevelId: string;
+  debugLevelName: string;
+  minutes: number;
+}
+
 export class TraceFlagView {
   private panel: vscode.WebviewPanel | undefined;
   private flags: TraceFlagInfo[] = [];
+  private lastPreset: TracePreset | undefined;
   private onNewTraceCallback?: () => void;
+  private onReTraceCallback?: () => void;
   private onDeleteCallback?: (flagId: string) => void;
   private onExtendCallback?: (flagId: string, expirationIso: string, minutes: number) => void;
   private onRefreshCallback?: () => void;
@@ -24,6 +34,7 @@ export class TraceFlagView {
 
     this.panel.webview.onDidReceiveMessage((msg) => {
       if (msg.command === 'newTrace') { this.onNewTraceCallback?.(); }
+      else if (msg.command === 'reTrace') { this.onReTraceCallback?.(); }
       else if (msg.command === 'delete') { this.onDeleteCallback?.(msg.flagId); }
       else if (msg.command === 'extend') { this.onExtendCallback?.(msg.flagId, msg.expirationIso, msg.minutes); }
       else if (msg.command === 'refresh') { this.onRefreshCallback?.(); }
@@ -35,6 +46,7 @@ export class TraceFlagView {
   }
 
   onNewTrace(cb: () => void) { this.onNewTraceCallback = cb; }
+  onReTraceLast(cb: () => void) { this.onReTraceCallback = cb; }
   onDelete(cb: (flagId: string) => void) { this.onDeleteCallback = cb; }
   onExtend(cb: (flagId: string, expirationIso: string, minutes: number) => void) { this.onExtendCallback = cb; }
   onRefresh(cb: () => void) { this.onRefreshCallback = cb; }
@@ -44,12 +56,18 @@ export class TraceFlagView {
     this.pushState();
   }
 
+  setLastPreset(preset: TracePreset | undefined) {
+    this.lastPreset = preset;
+    this.panel?.webview.postMessage({ command: 'setPreset', preset: preset ?? null });
+  }
+
   setBusy(busy: boolean, message?: string) {
     this.panel?.webview.postMessage({ command: 'busy', busy, message });
   }
 
   private pushState() {
     this.panel?.webview.postMessage({ command: 'setFlags', flags: this.flags });
+    this.panel?.webview.postMessage({ command: 'setPreset', preset: this.lastPreset ?? null });
   }
 
   close() { this.panel?.dispose(); }
@@ -91,6 +109,7 @@ export class TraceFlagView {
   </p>
   <div class="actions">
     <button id="btn-new">+ Trace another user</button>
+    <button id="btn-retrace" class="secondary" style="display:none"></button>
     <button id="btn-refresh" class="secondary">↻ Refresh</button>
     <span class="grow"></span>
     <span class="status-line" id="status-line"></span>
@@ -168,6 +187,9 @@ export class TraceFlagView {
     document.getElementById('btn-new').addEventListener('click', () => {
       vscode.postMessage({ command: 'newTrace' });
     });
+    document.getElementById('btn-retrace').addEventListener('click', () => {
+      vscode.postMessage({ command: 'reTrace' });
+    });
     document.getElementById('btn-refresh').addEventListener('click', () => {
       vscode.postMessage({ command: 'refresh' });
     });
@@ -193,12 +215,22 @@ export class TraceFlagView {
       if (msg.command === 'setFlags') {
         flags = msg.flags || [];
         render();
+      } else if (msg.command === 'setPreset') {
+        const btn = document.getElementById('btn-retrace');
+        if (msg.preset) {
+          btn.textContent = '↻ Re-trace ' + (msg.preset.userName || 'last user');
+          btn.title = 'Trace ' + esc(msg.preset.userName) + ' with ' + esc(msg.preset.debugLevelName) + ' for ' + msg.preset.minutes + ' min';
+          btn.style.display = '';
+        } else {
+          btn.style.display = 'none';
+        }
       } else if (msg.command === 'busy') {
         isBusy = !!msg.busy;
         statusLine.innerHTML = msg.busy
           ? '<span class="spinner"></span>' + esc(msg.message || 'Working…')
           : '';
         document.getElementById('btn-new').disabled = isBusy;
+        document.getElementById('btn-retrace').disabled = isBusy;
         document.getElementById('btn-refresh').disabled = isBusy;
       }
     });

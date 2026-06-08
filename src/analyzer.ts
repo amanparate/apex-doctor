@@ -5,6 +5,8 @@ import { buildCpuProfile, CpuProfile } from './profiler';
 import { extractTriggers, TriggerPhaseGroup } from './triggerOrder';
 import { extractAsyncInvocations, detectAsyncEntryPoint, AsyncInvocation, AsyncEntryPoint } from './asyncTracer';
 import { recommendDebugLevels, DebugLevelRecommendation } from './debugLevelAdvisor';
+import { buildHeapProfile, HeapProfile } from './heapProfiler';
+import { extractFlows, FlowExecution } from './flowAnalysis';
 
 export interface StackFrame {
   className: string;
@@ -82,7 +84,9 @@ export interface Analysis {
   flameRoot: FlameNode;
   insights: Insight[];
   cpuProfile: CpuProfile;
+  heapProfile: HeapProfile;
   triggerGroups: TriggerPhaseGroup[];
+  flows: FlowExecution[];
   asyncInvocations: AsyncInvocation[];
   asyncEntryPoint?: AsyncEntryPoint;
   debugLevelRecommendations: DebugLevelRecommendation[];
@@ -434,6 +438,42 @@ export class ApexDoctor {
       flameRoot.durationMs = (flameRoot.endNs - flameRoot.startNs) / 1e6;
     }
 
+    // Heap profile — attribute HEAP_ALLOCATE bytes to methods. Pull the authoritative
+    // peak live-heap from the "Maximum heap size" governor metric if it was parsed.
+    let heapMetric: { used: number; limit: number } | undefined;
+    for (const lu of parsedLimits) {
+      const m = lu.metrics.find(x => /heap/i.test(x.name));
+      if (m && (!heapMetric || m.used > heapMetric.used)) {
+        heapMetric = { used: m.used, limit: m.limit };
+      }
+    }
+    const heapProfile = buildHeapProfile(parsed.events, heapMetric);
+    if (heapProfile.pctOfLimit !== undefined && heapProfile.pctOfLimit >= 80) {
+      issues.push({
+        severity: heapProfile.pctOfLimit >= 95 ? 'error' : 'warning',
+        type: 'Heap Limit Pressure',
+        message: `Peak heap reached ${heapProfile.pctOfLimit.toFixed(0)}% of the allotted limit`,
+        timestamp: execStart?.timestamp || '00:00:00.000',
+        context: heapProfile.topAllocator
+          ? `Biggest allocator: ${heapProfile.topAllocator.name}. Reduce collection sizes, null out references, or move work async for a larger heap.`
+          : 'Reduce in-memory collection sizes or move work to an async context for a larger heap.',
+      });
+    }
+
+    // Flow / Process Builder analysis
+    const flows = extractFlows(parsed.events);
+    for (const flow of flows) {
+      if (flow.loopedElements.length) {
+        issues.push({
+          severity: 'warning',
+          type: 'Flow Element in Loop',
+          message: `Flow "${flow.flowName}" ran element(s) ${flow.loopedElements.join(', ')} many times — likely inside a loop`,
+          timestamp: execStart?.timestamp || '00:00:00.000',
+          context: 'Flow elements that do SOQL/DML inside a loop hit governor limits. Move record operations outside the loop or bulkify the flow.',
+        });
+      }
+    }
+
     const sortedIssues = issues.sort((a, b) => this.sev(a.severity) - this.sev(b.severity));
     const sortedMethods = methods.sort((a, b) => b.durationMs - a.durationMs).slice(0, 50);
 
@@ -472,7 +512,9 @@ export class ApexDoctor {
       flameRoot,
       insights: [],
       cpuProfile: buildCpuProfile(flameRoot, sortedMethods),
+      heapProfile,
       triggerGroups: extractTriggers(parsed.events),
+      flows,
       asyncInvocations: extractAsyncInvocations(parsed.events),
       asyncEntryPoint: detectAsyncEntryPoint(parsed.events),
       debugLevelRecommendations: recommendDebugLevels(parsed),

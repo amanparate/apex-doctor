@@ -5,7 +5,9 @@ import { AsyncLink } from "./asyncTracer";
 import { RecurringPatterns } from "./recurringPatterns";
 import {
   renderCpuProfiler,
+  renderHeapProfiler,
   renderTriggerOrder,
+  renderFlows,
   renderAsyncTracer,
   renderDebugLevelRecs,
   renderRecurringBanner,
@@ -301,6 +303,7 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
     details.section[open] > summary::before { transform: rotate(90deg); }
     details.section > summary:hover { background: var(--vscode-list-hoverBackground, rgba(127, 127, 127, 0.06)); }
     details.section > summary .count { font-size: 11px; font-weight: 500; opacity: 0.55; padding: 2px 8px; border-radius: 10px; background: var(--vscode-editorWidget-background); font-family: var(--vscode-editor-font-family); }
+    .csv-btn { margin-left: auto; }
     details.section > *:not(summary) { padding: 0 14px; }
     details.section table { margin-top: 4px; }
     /* Cleaner tables — zebra rows, no inter-cell borders */
@@ -475,6 +478,8 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
       ${renderTriggerOrder(a.triggerGroups)}
 
+      ${renderFlows(a.flows)}
+
       ${renderAsyncTracer(a.asyncInvocations, options.asyncLinks ?? [], a.asyncEntryPoint)}
 
       ${renderDebugLevelRecs(a.debugLevelRecommendations)}
@@ -490,21 +495,22 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
       <h2>CPU Profiler</h2>
       <p class="muted">Self-time attribution and hot-path analysis. Find <em>where</em> the CPU actually went, not just which method took longest.</p>
       ${renderCpuProfiler(a)}
+      ${renderHeapProfiler(a)}
     </div>
 
     <div class="tab-panel" data-panel="tables">
       <details class="section" open>
-        <summary>SOQL Queries <span class="count">${a.soql.length}</span></summary>
+        <summary>SOQL Queries <span class="count">${a.soql.length}</span>${a.soql.length ? `<button class="mini csv-btn" onclick="event.preventDefault();exportCsv('soql')">⤓ CSV</button>` : ""}</summary>
         ${soqlHtml}
       </details>
 
-      <details class="section" ${a.dml.length ? "" : ""}>
-        <summary>DML Operations <span class="count">${a.dml.length}</span></summary>
+      <details class="section">
+        <summary>DML Operations <span class="count">${a.dml.length}</span>${a.dml.length ? `<button class="mini csv-btn" onclick="event.preventDefault();exportCsv('dml')">⤓ CSV</button>` : ""}</summary>
         ${dmlHtml}
       </details>
 
       <details class="section">
-        <summary>Slowest Methods <span class="count">${a.methods.length}</span></summary>
+        <summary>Slowest Methods <span class="count">${a.methods.length}</span>${a.methods.length ? `<button class="mini csv-btn" onclick="event.preventDefault();exportCsv('methods')">⤓ CSV</button>` : ""}</summary>
         ${methodsHtml}
       </details>
 
@@ -597,6 +603,25 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
       function queryPlan(idx) {
         const query = __soqlQueries[idx];
         if (query) { vscode.postMessage({ command: 'queryPlan', query }); }
+      }
+
+      // CSV export — data embedded for client-side CSV building.
+      const __csvData = {
+        soql: ${JSON.stringify(a.soql.map((q) => ({ query: q.query, rows: q.rows ?? "", durationMs: q.durationMs ?? "", line: q.lineNumber ?? "" })))},
+        dml: ${JSON.stringify(a.dml.map((d) => ({ operation: d.operation, rows: d.rows ?? "", durationMs: d.durationMs ?? "", line: d.lineNumber ?? "" })))},
+        methods: ${JSON.stringify(a.methods.map((m) => ({ name: m.name, durationMs: m.durationMs, line: m.lineNumber ?? "" })))}
+      };
+      function csvEscape(v) {
+        const s = String(v ?? '');
+        return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }
+      function exportCsv(kind) {
+        const rows = __csvData[kind] || [];
+        if (!rows.length) { return; }
+        const headers = Object.keys(rows[0]);
+        const lines = [headers.join(',')];
+        for (const r of rows) { lines.push(headers.map(h => csvEscape(r[h])).join(',')); }
+        vscode.postMessage({ command: 'exportCsv', csv: lines.join('\\n'), label: kind });
       }
 
       function askLog() {

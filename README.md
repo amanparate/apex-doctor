@@ -17,6 +17,10 @@ Paste any Salesforce Apex debug log into VS Code, right-click, and get an instan
 - 💬 **Ask the Log (natural language)** — _"show me SOQL that returned > 500 rows"_, _"methods after the exception"_, _"debugs from AccountHandler"_. LLM picks the right array; we hydrate the matched rows locally so nothing is fabricated.
 - 🔧 **Suggest fix — one-click refactor with diff preview** — for SOQL-in-loop, missing LIMIT, and more. Templated transforms when a pattern matches; AI fallback otherwise. Always preview-then-apply via VS Code's diff view.
 - 🔥 **CPU Profiler** — self-time attribution, hot path, single-bottleneck callout. The first Apex tool that tells you _where_ the CPU actually went, not just which method took longest.
+- 🧠 **Heap / memory profiler** — `HEAP_ALLOCATE` bytes attributed to the method that allocated them, biggest-allocator callout, and peak-heap-vs-limit pressure warnings. The memory twin of the CPU profiler.
+- 🌊 **Flow / Process Builder analysis** — per-flow element timeline with timing, DB-bearing element markers, and "Flow element in loop" detection.
+- 🛠️ **Editor quick-fixes** — lightbulb fixes right on your `.cls` files for issues from the latest analysis (SOQL-in-loop → bulkify, etc.).
+- 🩺 **Activity-bar sidebar** — a dedicated Apex Doctor icon with Current Analysis, Recent Logs, and Recurring Issues views.
 - 🔁 **Recurring patterns** — _"this NullPointerException has appeared 4 times this week"_. Cross-log analytics on your saved analyses.
 - ⚡ **Async tracer** — stitches together parent and child logs for `@future` / Queueable / Batch / Schedulable, so you can see the full async chain.
 - 🪝 **Trigger order visualiser** — order of execution per sObject + DML phase, slowest-trigger callout, recursion detection.
