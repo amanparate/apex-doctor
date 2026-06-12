@@ -143,3 +143,26 @@ export const ACCOUNT_HANDLER_CLS = [
   "  }",
   "}",
 ].join("\n");
+
+// One DML save cycle exercising the canonical order of execution:
+// before trigger → validation → after trigger → workflow field update →
+// trigger re-fires (re-entry) → record-triggered flow.
+export const ORDER_OF_EXECUTION_LOG = [
+  "52.0 APEX_CODE,DEBUG;",
+  "12:00:00.000 (1000)|EXECUTION_STARTED",
+  "12:00:00.000 (2000)|DML_BEGIN|[5]|Op:Update|Type:Account|Rows:1",
+  "12:00:00.000 (3000)|CODE_UNIT_STARTED|[EXTERNAL]|01q000000000001|AccountTrigger on Account trigger event BeforeUpdate for [001xx]",
+  "12:00:00.000 (4000)|CODE_UNIT_FINISHED|AccountTrigger",
+  "12:00:00.000 (5000)|VALIDATION_RULE|03d000000000001|Require_Industry",
+  "12:00:00.000 (6000)|VALIDATION_PASS",
+  "12:00:00.000 (7000)|CODE_UNIT_STARTED|[EXTERNAL]|01q000000000001|AccountTrigger on Account trigger event AfterUpdate for [001xx]",
+  "12:00:00.000 (8000)|CODE_UNIT_FINISHED|AccountTrigger",
+  "12:00:00.000 (9000)|WF_RULE_EVAL_BEGIN|Workflow",
+  "12:00:00.000 (10000)|WF_FIELD_UPDATE|[Account.Region]|Set region",
+  "12:00:00.000 (11000)|CODE_UNIT_STARTED|[EXTERNAL]|01q000000000001|AccountTrigger on Account trigger event BeforeUpdate for [001xx]",
+  "12:00:00.000 (12000)|CODE_UNIT_FINISHED|AccountTrigger",
+  "12:00:00.000 (13000)|FLOW_ELEMENT_BEGIN|INT1|recordUpdates|Update_Children",
+  "12:00:00.000 (14000)|FLOW_ELEMENT_END|INT1|recordUpdates|Update_Children",
+  "12:00:00.000 (15000)|DML_END|[5]",
+  "12:00:00.000 (20000)|EXECUTION_FINISHED",
+].join("\n");

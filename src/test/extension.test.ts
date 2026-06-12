@@ -9,6 +9,8 @@ import { parseNlQueryResponse } from "../nlQuery";
 import { diffEvents } from "../lineDiff";
 import { buildHeapProfile, formatBytes } from "../heapProfiler";
 import { extractFlows } from "../flowAnalysis";
+import { extractOrderOfExecution } from "../orderOfExecution";
+import { detectJourney } from "../journey";
 import {
   NORMAL_LOG,
   SOQL_IN_LOOP_LOG,
@@ -22,6 +24,7 @@ import {
   HEAP_LOG,
   FLOW_LOG,
   ACCOUNT_HANDLER_CLS,
+  ORDER_OF_EXECUTION_LOG,
 } from "./fixtures";
 
 const parser = new ApexLogParser();
@@ -487,5 +490,78 @@ suite("Code actions (templated fix gating)", () => {
     assert.ok(fix, "expected the bulkify code-action template to fire");
     assert.match(fix!.newFileText, /IN\s+:/);
     void a;
+  });
+});
+
+suite("Order of execution", () => {
+  test("reconstructs the save cycle with fired steps and re-entry", () => {
+    const cycles = extractOrderOfExecution(parser.parse(ORDER_OF_EXECUTION_LOG).events);
+    assert.strictEqual(cycles.length, 1);
+    const c = cycles[0];
+    assert.strictEqual(c.sObject, "Account");
+    assert.strictEqual(c.operation, "Update");
+    const fired = new Set(c.steps.filter((s) => s.fired).map((s) => s.key));
+    assert.ok(fired.has("beforeTriggers"));
+    assert.ok(fired.has("validationRules"));
+    assert.ok(fired.has("afterTriggers"));
+    assert.ok(fired.has("workflowRules"));
+    assert.ok(fired.has("flows"));
+    assert.ok(c.reEntry, "expected re-entry after the workflow field update");
+    const wf = c.steps.find((s) => s.key === "workflowRules");
+    assert.match(wf!.detail ?? "", /field update/);
+  });
+
+  test("trigger-initiated transactions (no DML event) still get a cycle", () => {
+    const cycles = extractOrderOfExecution(parser.parse(TRIGGER_ORDER_LOG).events);
+    assert.ok(cycles.length >= 1);
+    const before = cycles[0].steps.find((s) => s.key === "beforeTriggers");
+    assert.ok(before?.fired);
+    assert.match(before!.detail ?? "", /AccountTrigger/);
+  });
+
+  test("a bare log with no automation yields no cycles", () => {
+    const cycles = extractOrderOfExecution(parser.parse(NORMAL_LOG).events);
+    assert.strictEqual(cycles.length, 0);
+  });
+});
+
+suite("User journey", () => {
+  const entryFor = (id: string, source: string, startTs: string) => {
+    const log = NORMAL_LOG.split("12:00:00.000").join(startTs);
+    const analysis = doctor.analyze(parser.parse(log));
+    return {
+      id,
+      label: `${id}.log`,
+      savedAt: new Date().toISOString(),
+      source,
+      totalDurationMs: analysis.summary.totalDurationMs,
+      soqlCount: analysis.soql.length,
+      dmlCount: 0,
+      errorCount: 0,
+      warningCount: 0,
+      analysis,
+    };
+  };
+
+  test("clusters logs within the time window and excludes distant ones", () => {
+    const history = [
+      entryFor("a", "/tmp/a.log", "12:00:00.000"),
+      entryFor("b", "/tmp/b.log", "12:00:30.000"),
+      entryFor("c", "/tmp/c.log", "12:10:00.000"),
+    ];
+    const journey = detectJourney(history, "/tmp/b.log");
+    assert.strictEqual(journey.length, 2, "expected a + b, not c");
+    assert.deepStrictEqual(journey.map((j) => j.id), ["a", "b"]);
+    assert.strictEqual(journey.find((j) => j.id === "b")!.isCurrent, true);
+  });
+
+  test("a journey of one returns empty (no strip rendered)", () => {
+    const history = [entryFor("solo", "/tmp/solo.log", "12:00:00.000")];
+    assert.deepStrictEqual(detectJourney(history, "/tmp/solo.log"), []);
+  });
+
+  test("unknown current source returns empty", () => {
+    const history = [entryFor("a", "/tmp/a.log", "12:00:00.000")];
+    assert.deepStrictEqual(detectJourney(history, "/tmp/zzz.log"), []);
   });
 });

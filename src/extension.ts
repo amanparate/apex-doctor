@@ -29,6 +29,7 @@ import { RecurringIssuesProvider } from "./recurringIssuesView";
 import { suggestFixForIssue, FixDiffContentProvider } from "./fixSuggestions";
 import { ApexFixActionProvider, APPLY_FIX_COMMAND } from "./codeActions";
 import { CurrentAnalysisProvider } from "./currentAnalysisView";
+import { detectJourney, JourneyEntry } from "./journey";
 import { buildNlQueryPrompt, parseNlQueryResponse, NlQueryResult } from "./nlQuery";
 import { CoverageProvider } from "./coverageProvider";
 import { showQueryPlan } from "./queryPlanView";
@@ -59,12 +60,13 @@ function buildAsyncHistory(context: vscode.ExtensionContext): AsyncHistoryEntry[
 function computeRenderOptions(
   context: vscode.ExtensionContext,
   analysis: Analysis,
-): { recurring: RecurringPatterns; asyncLinks: AsyncLink[] } {
+): { recurring: RecurringPatterns; asyncLinks: AsyncLink[]; journey: JourneyEntry[] } {
   const history = loadHistory(context);
   const recurring = detectRecurringPatterns(history);
   const asyncHistory = buildAsyncHistory(context);
   const asyncLinks = linkAsyncChain(analysis.asyncInvocations, asyncHistory);
-  return { recurring, asyncLinks };
+  const journey = detectJourney(history, currentLogUri?.fsPath);
+  return { recurring, asyncLinks, journey };
 }
 
 function saveAnalysisToHistory(
@@ -932,6 +934,10 @@ function openAnalysisPanel(
       const query: string = (msg.query || "").trim();
       if (!query) { return; }
       await showQueryPlan(query, sf);
+    } else if (msg.command === "openJourneyEntry") {
+      if (msg.id) {
+        await vscode.commands.executeCommand("apexDoctor.openRecent", msg.id);
+      }
     } else if (msg.command === "askLog") {
       if (!currentAnalysis) { return; }
       const question: string = (msg.text || "").trim();

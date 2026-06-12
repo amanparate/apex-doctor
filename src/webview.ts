@@ -11,13 +11,17 @@ import {
   renderAsyncTracer,
   renderDebugLevelRecs,
   renderRecurringBanner,
+  renderOrderOfExecution,
+  renderJourneyStrip,
   tabSwitchingCss,
   tabSwitchingScript,
 } from "./webviewSections";
+import { JourneyEntry } from "./journey";
 
 export interface AnalysisRenderOptions {
   recurring?: RecurringPatterns;
   asyncLinks?: AsyncLink[];
+  journey?: JourneyEntry[];
 }
 
 function escapeHtml(s: string): string {
@@ -66,7 +70,11 @@ function renderVerdictBanner(a: Analysis): string {
   let severity: "good" | "warning" | "critical" = "good";
   let icon = "✅";
   let title: string;
-  let detail = `${fmt0(totalMs)} ms · ${a.soql.length} SOQL · ${a.dml.length} DML`;
+  // The banner is the ONLY place these numbers appear — no separate metric strip.
+  let detail = `${fmt0(totalMs)} ms · ${a.soql.length} SOQL · ${a.dml.length} DML · ${a.debugs.length} debugs`;
+  if (errorCount > 0 || warningCount > 0) {
+    detail += ` · ${errorCount} error${errorCount === 1 ? "" : "s"} · ${warningCount} warning${warningCount === 1 ? "" : "s"}`;
+  }
 
   if (fatal) {
     severity = "critical";
@@ -79,7 +87,6 @@ function renderVerdictBanner(a: Analysis): string {
     severity = "critical";
     icon = "⚠️";
     title = `${errorCount} error${errorCount === 1 ? "" : "s"} detected`;
-    detail += ` · ${warningCount} warning${warningCount === 1 ? "" : "s"}`;
   } else if (warningCount > 0) {
     severity = "warning";
     icon = "⚠️";
@@ -94,23 +101,6 @@ function renderVerdictBanner(a: Analysis): string {
       <div class="verdict-title">${title}</div>
       <div class="verdict-detail">${detail}</div>
     </div>
-  </div>`;
-}
-
-/** Compact horizontal strip — replaces the 6-card grid. */
-function renderMetricStrip(a: Analysis): string {
-  const errorCount = a.issues.filter((i) => i.severity === "fatal" || i.severity === "error").length;
-  const warningCount = a.issues.filter((i) => i.severity === "warning").length;
-  const fmt0 = (n: number) => Math.round(n).toLocaleString();
-  const cell = (label: string, value: string | number, cls = "") =>
-    `<span class="metric ${cls}"><span class="metric-value">${value}</span><span class="metric-label">${label}</span></span>`;
-  return `<div class="metric-strip">
-    ${cell("ms", fmt0(a.summary.totalDurationMs))}
-    ${cell("SOQL", a.soql.length)}
-    ${cell("DML", a.dml.length)}
-    ${cell("errors", errorCount, errorCount > 0 ? "metric-error" : "")}
-    ${cell("warnings", warningCount, warningCount > 0 ? "metric-warning" : "")}
-    ${cell("debugs", a.debugs.length)}
   </div>`;
 }
 
@@ -140,6 +130,62 @@ function renderLimitsHtml(limits: LimitUsage[]): string {
     </div>`;
   });
   return blocks.join("");
+}
+
+/**
+ * Compact navigator row at the bottom of Overview — one chip per detail tab,
+ * each summarising what's inside so the user knows whether to click through.
+ */
+function renderNavChips(a: Analysis, options: AnalysisRenderOptions): string {
+  const triggerCount = a.triggerGroups.reduce((s, g) => s + g.triggers.length, 0);
+  const journeyCount = options.journey?.length ?? 0;
+
+  const execParts: string[] = [];
+  if (a.saveCycles.length) {
+    execParts.push(`${a.saveCycles.length} save cycle${a.saveCycles.length === 1 ? "" : "s"}`);
+  }
+  if (triggerCount) {
+    execParts.push(`${triggerCount} trigger${triggerCount === 1 ? "" : "s"}`);
+  }
+  if (a.flows.length) {
+    execParts.push(`${a.flows.length} flow${a.flows.length === 1 ? "" : "s"}`);
+  }
+  if (journeyCount) {
+    execParts.push(`journey of ${journeyCount}`);
+  }
+  if (a.asyncInvocations.length) {
+    execParts.push(`${a.asyncInvocations.length} async`);
+  }
+
+  const hotspot = a.cpuProfile.hotLeaf;
+  const perfParts: string[] = [];
+  if (hotspot) {
+    perfParts.push(`hotspot ${hotspot.name.split(".").pop() ?? hotspot.name}`);
+  }
+  if (a.heapProfile.allocationCount) {
+    perfParts.push(`${a.heapProfile.allocationCount} heap allocs`);
+  }
+  const nearLimit = a.limits
+    .flatMap((l) => l.metrics)
+    .filter((m) => m.pct >= 50).length;
+  if (nearLimit) {
+    perfParts.push(`${nearLimit} limit${nearLimit === 1 ? "" : "s"} > 50%`);
+  }
+
+  const dataParts = [
+    `${a.soql.length} SOQL`,
+    `${a.dml.length} DML`,
+    `${a.debugs.length} debugs`,
+  ];
+
+  const chip = (tab: string, label: string, parts: string[]) =>
+    `<button class="navchip" data-tab="${tab}"><strong>${label}</strong><span class="navchip-k">${escapeHtml(parts.length ? parts.join(" · ") : "—")}</span></button>`;
+
+  return `<div class="navchips">
+    ${chip("execution", "Execution", execParts)}
+    ${chip("performance", "Performance", perfParts)}
+    ${chip("data", "Data", dataParts)}
+  </div>`;
 }
 
 export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions = {}): string {
@@ -181,12 +227,9 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
         .join("")
     : `<p class="muted">No issues detected. 🎉</p>`;
 
+  // One muted line under the header — not a card.
   const userInfoHtml = a.userInfo
-    ? `<div class="card user-card">
-         <div class="l">Executed by</div>
-         <div class="v">${esc(a.userInfo.Name)}</div>
-         <div class="muted">${esc(a.userInfo.Username)} · ${esc(a.userInfo.Email)}${a.userInfo.ProfileName ? " · " + esc(a.userInfo.ProfileName) : ""}</div>
-       </div>`
+    ? `<p class="executed-by muted small">Executed by <strong>${esc(a.userInfo.Name)}</strong> · ${esc(a.userInfo.Username)}${a.userInfo.ProfileName ? " · " + esc(a.userInfo.ProfileName) : ""}</p>`
     : "";
 
   const lineLink = (line?: number) =>
@@ -325,16 +368,10 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
     .verdict-icon { font-size: 28px; line-height: 1; }
     .verdict-title { font-size: 16px; font-weight: 600; line-height: 1.2; }
     .verdict-detail { font-size: 12px; opacity: 0.7; margin-top: 2px; font-family: var(--vscode-editor-font-family); }
-    .metric-strip { display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 0 14px; border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 12px; }
-    .metric { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
-    .metric-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--vscode-editor-font-family); }
-    .metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; opacity: 0.55; }
-    .metric.metric-error .metric-value { color: #ef4444; }
-    .metric.metric-warning .metric-value { color: #f59e0b; }
+    .executed-by { margin: -4px 0 12px; }
     .card { background: var(--vscode-editorWidget-background); padding: 10px 12px; border-radius: 6px; }
     .card .v { font-size: 20px; font-weight: 600; }
     .card .l { font-size: 10px; text-transform: uppercase; opacity: 0.7; letter-spacing: 0.5px; }
-    .user-card { border-left: 3px solid #3498db; }
     .issue { border-left: 4px solid; padding: 8px 12px; margin: 8px 0; background: var(--vscode-editorWidget-background); border-radius: 4px; }
     .issue.fatal { border-color: #d33; } .issue.error { border-color: #e67e22; }
     .issue.warning { border-color: #e6c74d; } .issue.info { border-color: #3498db; }
@@ -426,55 +463,44 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
     ${renderRecurringBanner(options.recurring)}
 
-    ${renderMetricStrip(a)}
-
     <div class="actions">
-      <button onclick="explainAll()" id="btn-explain-all">🤖 Explain root cause with AI</button>
+      <button onclick="toggleAssistant()" id="btn-assistant">🤖 Assistant</button>
       <button onclick="exportMarkdown()">📋 Copy as Markdown</button>
     </div>
 
     <div class="tabs">
       <button class="tab-btn" data-tab="overview">Overview</button>
-      <button class="tab-btn" data-tab="profiler">Profiler</button>
-      <button class="tab-btn" data-tab="tables">Tables</button>
+      <button class="tab-btn" data-tab="execution">Execution</button>
+      <button class="tab-btn" data-tab="performance">Performance</button>
+      <button class="tab-btn" data-tab="data">Data</button>
     </div>
 
     <div class="tab-panel" data-panel="overview">
       ${
         a.insights.length
           ? `
-        <h2>💡 Performance Insights</h2>
+        <h2>Performance Insights</h2>
         ${renderInsightsHtml(a.insights)}
       `
           : ""
       }
 
-      <div class="ai-panel" id="ai-panel" style="display:none">
-        <h3>🤖 AI Root-Cause Analysis <span class="spinner" id="ai-spinner" style="display:none"></span></h3>
-        <div id="chat-history"></div>
-        <div id="ai-output"></div>
-        <div class="chat-input-row">
-          <input id="chat-msg" type="text" placeholder="Ask a follow-up… e.g. 'What if we made this query selective?'" />
-          <button id="chat-send" onclick="sendChat()">Send</button>
-        </div>
-      </div>
-
       ${
         testResultsHtml
-          ? `<h2>🧪 Test Results</h2>${testResultsHtml}`
+          ? `<h2>Test Results</h2>${testResultsHtml}`
           : ""
       }
 
-      <h2>🛑 Issues &amp; Errors</h2>
+      <h2>Issues &amp; Errors</h2>
       ${issuesHtml}
 
-      <h2>💬 Ask the Log</h2>
-      <p class="muted small">Natural-language query over the parsed log. Examples: <em>"SOQL queries that returned more than 500 rows"</em>, <em>"methods that ran after the exception"</em>, <em>"debug statements from AccountHandler"</em>.</p>
-      <div class="ask-row">
-        <input id="ask-input" type="text" placeholder="Ask anything about this log…" />
-        <button id="ask-btn" onclick="askLog()">Ask</button>
-      </div>
-      <div id="ask-results"></div>
+      ${renderNavChips(a, options)}
+    </div>
+
+    <div class="tab-panel" data-panel="execution">
+      ${renderJourneyStrip(options.journey ?? [])}
+
+      ${renderOrderOfExecution(a.saveCycles)}
 
       ${renderTriggerOrder(a.triggerGroups)}
 
@@ -482,23 +508,49 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
       ${renderAsyncTracer(a.asyncInvocations, options.asyncLinks ?? [], a.asyncEntryPoint)}
 
-      ${renderDebugLevelRecs(a.debugLevelRecommendations)}
-
-      <h2>📈 Activity Timeline</h2>
+      <h2>Activity Timeline</h2>
       ${flameHtml}
-
-      <h2>📈 Governor Limits</h2>
-      ${limitsHtml}
     </div>
 
-    <div class="tab-panel" data-panel="profiler">
+    <div class="tab-panel" data-panel="performance">
       <h2>CPU Profiler</h2>
       <p class="muted">Self-time attribution and hot-path analysis. Find <em>where</em> the CPU actually went, not just which method took longest.</p>
       ${renderCpuProfiler(a)}
       ${renderHeapProfiler(a)}
+
+      <h2>Governor Limits</h2>
+      ${limitsHtml}
+
+      ${renderDebugLevelRecs(a.debugLevelRecommendations)}
     </div>
 
-    <div class="tab-panel" data-panel="tables">
+    <div class="assistant-drawer" id="assistant-drawer">
+      <div class="assistant-head">
+        <h3>🤖 Assistant</h3>
+        <button class="mini" onclick="explainAll()" id="btn-explain-all">Explain root cause</button>
+        <button class="assistant-close" onclick="closeAssistant()" title="Close">✕</button>
+      </div>
+      <div class="assistant-body">
+        <div class="ai-panel" id="ai-panel">
+          <div class="assistant-section-label">Root-cause chat <span class="spinner" id="ai-spinner" style="display:none"></span></div>
+          <div id="chat-history"></div>
+          <div id="ai-output"></div>
+          <div class="chat-input-row">
+            <input id="chat-msg" type="text" placeholder="Ask a follow-up… e.g. 'What if we made this query selective?'" />
+            <button id="chat-send" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+        <div class="assistant-section-label">Ask the Log — natural-language query</div>
+        <p class="muted small">Examples: <em>"SOQL that returned more than 500 rows"</em>, <em>"methods after the exception"</em>.</p>
+        <div class="ask-row">
+          <input id="ask-input" type="text" placeholder="Ask anything about this log…" />
+          <button id="ask-btn" onclick="askLog()">Ask</button>
+        </div>
+        <div id="ask-results"></div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="data">
       <details class="section" open>
         <summary>SOQL Queries <span class="count">${a.soql.length}</span>${a.soql.length ? `<button class="mini csv-btn" onclick="event.preventDefault();exportCsv('soql')">⤓ CSV</button>` : ""}</summary>
         ${soqlHtml}
@@ -527,7 +579,6 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
 
     <script>
       const vscode = acquireVsCodeApi();
-      const panel = document.getElementById('ai-panel');
       const output = document.getElementById('ai-output');
       const chatHistory = document.getElementById('chat-history');
       const chatInput = document.getElementById('chat-msg');
@@ -544,9 +595,9 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
         vscode.setState({ chatBubbles, allAiText });
       }
 
+      // Restore chat content silently — the drawer only opens on demand.
       function rehydrate() {
         if (!chatBubbles.length && !allAiText) { return; }
-        panel.style.display = 'block';
         chatHistory.innerHTML = '';
         for (const b of chatBubbles) {
           const div = document.createElement('div');
@@ -556,10 +607,15 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
         }
       }
 
+      const drawer = document.getElementById('assistant-drawer');
+      function openAssistant() { drawer.classList.add('open'); }
+      function closeAssistant() { drawer.classList.remove('open'); }
+      function toggleAssistant() { drawer.classList.toggle('open'); }
+
       function exportMarkdown() { vscode.postMessage({ command: 'exportMarkdown', aiText: allAiText }); }
 
       function startStreaming() {
-        panel.style.display = 'block';
+        openAssistant();
         activeAssistantText = '';
         output.innerHTML = '';
         spinner.style.display = 'inline-block';
@@ -583,7 +639,6 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
         persistState();
         startStreaming();
         vscode.postMessage({ command: 'explainIssue', index: idx });
-        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
       function sendChat() {

@@ -6,6 +6,8 @@ import { FlowExecution } from "./flowAnalysis";
 import { AsyncInvocation, AsyncLink } from "./asyncTracer";
 import { DebugLevelRecommendation } from "./debugLevelAdvisor";
 import { RecurringPatterns } from "./recurringPatterns";
+import { SaveCycle } from "./orderOfExecution";
+import { JourneyEntry } from "./journey";
 
 export function escapeHtml(s: string): string {
   return (s ?? "").replace(
@@ -172,6 +174,68 @@ export function renderFlows(flows: FlowExecution[]): string {
     `,
       )
       .join("")}
+  `;
+}
+
+export function renderOrderOfExecution(cycles: SaveCycle[]): string {
+  if (!cycles.length) {
+    return "";
+  }
+  const cycle = (c: SaveCycle, idx: number) => `
+    <div class="ooe-cycle">
+      <div class="ooe-header">
+        <strong>${escapeHtml(c.operation ?? "Save")}${c.sObject ? ` · ${escapeHtml(c.sObject)}` : ""}</strong>
+        <span class="muted small">@ ${escapeHtml(c.timestamp)}</span>
+        ${c.reEntry ? `<span class="slow-pill">↻ triggers re-fired</span>` : ""}
+      </div>
+      <ol class="ooe-steps">
+        ${c.steps
+          .map((s) => {
+            const cls = s.fired ? "fired" : s.observable ? "silent" : "implicit";
+            const meta = s.fired
+              ? `${s.detail ? escapeHtml(s.detail) : `${s.count} event${s.count === 1 ? "" : "s"}`}`
+              : s.observable
+                ? "did not fire"
+                : "not visible in logs";
+            return `<li class="ooe-step ooe-${cls}">
+              <span class="ooe-dot"></span>
+              <span class="ooe-label">${escapeHtml(s.label)}</span>
+              <span class="muted small">${meta}</span>
+            </li>`;
+          })
+          .join("")}
+      </ol>
+    </div>${idx < cycles.length - 1 ? '<div class="ooe-divider"></div>' : ""}`;
+
+  return `
+    <h2>Order of Execution</h2>
+    <p class="muted small">The canonical Salesforce save order, reconstructed from this transaction. Greyed steps never emit log events; dimmed steps emit events but didn't fire here.</p>
+    ${cycles.map(cycle).join("")}
+  `;
+}
+
+export function renderJourneyStrip(journey: JourneyEntry[]): string {
+  if (!journey.length) {
+    return "";
+  }
+  const chips = journey
+    .map((j) => {
+      const error = j.errorCount > 0 ? `<span class="journey-err">⚠ ${j.errorCount}</span>` : "";
+      const body = `
+        <span class="journey-time">${escapeHtml(j.startedAt ?? "")}</span>
+        <span class="journey-label">${escapeHtml(j.label)}</span>
+        <span class="muted small">${j.totalDurationMs.toFixed(0)} ms</span>
+        ${error}`;
+      return j.isCurrent
+        ? `<span class="journey-chip current" title="This log">${body}</span>`
+        : `<a href="#" class="journey-chip" data-journey-id="${escapeHtml(j.id)}" title="Open this log's analysis">${body}</a>`;
+    })
+    .join('<span class="journey-arrow">→</span>');
+
+  return `
+    <h2>User Journey</h2>
+    <p class="muted small">${journey.length} logs from the same action, stitched by execution time. Click a chip to hop between them.</p>
+    <div class="journey-strip">${chips}</div>
   `;
 }
 
@@ -362,6 +426,41 @@ export function tabSwitchingCss(): string {
     .recurring-count.recurring-warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
     .recurring-count.recurring-critical { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
     .recurring-type { font-weight: 600; }
+    /* Order of execution */
+    .ooe-cycle { padding: 12px 16px; background: var(--vscode-editorWidget-background); border-radius: 6px; margin: 10px 0; }
+    .ooe-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .ooe-steps { list-style: none; margin: 0; padding: 0; position: relative; }
+    .ooe-steps::before { content: ''; position: absolute; left: 5px; top: 8px; bottom: 8px; width: 2px; background: var(--vscode-panel-border); }
+    .ooe-step { display: flex; align-items: baseline; gap: 10px; padding: 3px 0 3px 0; font-size: 13px; position: relative; }
+    .ooe-dot { width: 12px; height: 12px; border-radius: 6px; flex: none; position: relative; z-index: 1; background: var(--vscode-editor-background); border: 2px solid var(--vscode-panel-border); }
+    .ooe-fired .ooe-dot { background: var(--vscode-textLink-foreground); border-color: var(--vscode-textLink-foreground); }
+    .ooe-fired .ooe-label { font-weight: 600; }
+    .ooe-silent { opacity: 0.55; }
+    .ooe-implicit { opacity: 0.35; }
+    .ooe-implicit .ooe-dot { border-style: dashed; }
+    .ooe-divider { height: 8px; }
+    /* Journey strip */
+    .journey-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 10px 12px; background: var(--vscode-editorWidget-background); border-radius: 6px; }
+    .journey-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 14px; font-size: 12px; text-decoration: none; color: var(--vscode-foreground); background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); }
+    a.journey-chip:hover { border-color: var(--vscode-textLink-foreground); }
+    .journey-chip.current { border-color: var(--vscode-textLink-foreground); box-shadow: 0 0 0 1px var(--vscode-textLink-foreground); }
+    .journey-time { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: 0.7; }
+    .journey-label { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .journey-err { color: #ef4444; font-size: 11px; }
+    .journey-arrow { opacity: 0.5; }
+    /* Overview navigator chips */
+    .navchips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 4px; }
+    .navchip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 14px; font-size: 12px; cursor: pointer; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-panel-border); color: var(--vscode-foreground); }
+    .navchip:hover { border-color: var(--vscode-textLink-foreground); background: var(--vscode-editorWidget-background); }
+    .navchip .navchip-k { opacity: 0.6; }
+    /* Assistant drawer */
+    .assistant-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 92vw); background: var(--vscode-editor-background); border-left: 1px solid var(--vscode-panel-border); box-shadow: -8px 0 24px rgba(0,0,0,0.35); z-index: 1000; display: none; flex-direction: column; }
+    .assistant-drawer.open { display: flex; }
+    .assistant-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--vscode-panel-border); }
+    .assistant-head h3 { margin: 0; font-size: 14px; flex: 1; }
+    .assistant-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+    .assistant-close { background: transparent; color: var(--vscode-foreground); border: none; font-size: 16px; cursor: pointer; padding: 2px 8px; }
+    .assistant-section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; margin: 14px 0 6px; }
   `;
 }
 
@@ -371,14 +470,26 @@ export function tabSwitchingScript(): string {
       const persistKey = 'apexDoctor.activeTab';
       const tabs = document.querySelectorAll('.tab-btn');
       const panels = document.querySelectorAll('.tab-panel');
+      const validIds = new Set([...panels].map(p => p.dataset.panel));
       function activate(id) {
+        if (!validIds.has(id)) { id = 'overview'; }
         tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === id));
         panels.forEach(p => p.classList.toggle('active', p.dataset.panel === id));
         const state = vscode.getState() || {};
         state[persistKey] = id;
         vscode.setState(state);
       }
+      window.__activateTab = activate;
       tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+      // Navigator chips on Overview jump to their tab
+      document.querySelectorAll('.navchip[data-tab]').forEach(c =>
+        c.addEventListener('click', () => activate(c.dataset.tab)));
+      // Journey chips open sibling analyses
+      document.querySelectorAll('.journey-chip[data-journey-id]').forEach(c =>
+        c.addEventListener('click', (e) => {
+          e.preventDefault();
+          vscode.postMessage({ command: 'openJourneyEntry', id: c.dataset.journeyId });
+        }));
       const persisted = (vscode.getState() || {})[persistKey];
       activate(persisted || 'overview');
     })();

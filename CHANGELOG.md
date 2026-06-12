@@ -5,6 +5,24 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-06-08
+
+### Added
+
+- **🗺️ Order-of-Execution map** — the canonical Salesforce save order, reconstructed from the actual transaction. Each save cycle renders as a vertical stepper: before triggers → validation rules → duplicate rules → after triggers → assignment/workflow/escalation rules → record-triggered flows, with fired steps highlighted, silent steps dimmed, never-logged steps greyed, and a **"↻ triggers re-fired"** badge when a workflow field update causes re-entry. Lives at the top of the new Execution tab.
+- **🧵 User-journey stitching** — one UI click in Salesforce often produces several disconnected logs. Apex Doctor now clusters your Recent Analyses by execution-time proximity (same user when known) and renders the cluster as a clickable chip strip — hop between the sibling logs of the same user action with one click.
+
+### Changed (UI restructure — "elegant, not crowded")
+
+- **Four question-oriented tabs**: `Overview · Execution · Performance · Data` (was Overview · Profiler · Tables). Overview now contains only insights, test results, and issues, plus a compact **navigator row** of chips summarising what's inside the other tabs. Execution = journey + order-of-execution + triggers + flows + async + timeline. Performance = CPU + heap profilers + governor limits + debug-level recommendations. Data = the searchable tables.
+- **Assistant drawer** — the AI chat and natural-language "Ask the Log" merged into one slide-over panel opened from a single **🤖 Assistant** button. No more two idle input boxes in the reading flow.
+- **Header de-duplicated** — the metric strip is gone; the verdict banner is now the single place showing ms / SOQL / DML / debugs / errors / warnings. "Executed by" shrank from a card to one muted line. ~300px of redundant header reclaimed.
+- Section headers de-emojied for a calmer hierarchy (icons stay in content where they convey severity).
+
+### Tests
+
+- 43 passing (was 37): order-of-execution reconstruction + re-entry detection + trigger-rooted cycles, and journey clustering / windowing / edge cases.
+
 ## [0.10.0] — 2026-06-08
 
 ### Added

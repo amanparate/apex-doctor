@@ -7,6 +7,7 @@ import { extractAsyncInvocations, detectAsyncEntryPoint, AsyncInvocation, AsyncE
 import { recommendDebugLevels, DebugLevelRecommendation } from './debugLevelAdvisor';
 import { buildHeapProfile, HeapProfile } from './heapProfiler';
 import { extractFlows, FlowExecution } from './flowAnalysis';
+import { extractOrderOfExecution, SaveCycle } from './orderOfExecution';
 
 export interface StackFrame {
   className: string;
@@ -87,6 +88,7 @@ export interface Analysis {
   heapProfile: HeapProfile;
   triggerGroups: TriggerPhaseGroup[];
   flows: FlowExecution[];
+  saveCycles: SaveCycle[];
   asyncInvocations: AsyncInvocation[];
   asyncEntryPoint?: AsyncEntryPoint;
   debugLevelRecommendations: DebugLevelRecommendation[];
@@ -515,6 +517,7 @@ export class ApexDoctor {
       heapProfile,
       triggerGroups: extractTriggers(parsed.events),
       flows,
+      saveCycles: extractOrderOfExecution(parsed.events),
       asyncInvocations: extractAsyncInvocations(parsed.events),
       asyncEntryPoint: detectAsyncEntryPoint(parsed.events),
       debugLevelRecommendations: recommendDebugLevels(parsed),

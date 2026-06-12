@@ -16,6 +16,8 @@ Paste any Salesforce Apex debug log into VS Code, right-click, and get an instan
 - 🧪 **Test coverage overlay** — when a `.cls` is open, see covered / uncovered lines directly in the gutter, with a status-bar % for the class.
 - 💬 **Ask the Log (natural language)** — _"show me SOQL that returned > 500 rows"_, _"methods after the exception"_, _"debugs from AccountHandler"_. LLM picks the right array; we hydrate the matched rows locally so nothing is fabricated.
 - 🔧 **Suggest fix — one-click refactor with diff preview** — for SOQL-in-loop, missing LIMIT, and more. Templated transforms when a pattern matches; AI fallback otherwise. Always preview-then-apply via VS Code's diff view.
+- 🗺️ **Order-of-Execution map** — the canonical Salesforce save order reconstructed from your real transaction: which steps fired, in what order, and whether a workflow field update made the triggers re-fire.
+- 🧵 **User-journey stitching** — one click in Salesforce produces several disconnected logs; Apex Doctor stitches them back into the single action the user performed, as a clickable strip.
 - 🔥 **CPU Profiler** — self-time attribution, hot path, single-bottleneck callout. The first Apex tool that tells you _where_ the CPU actually went, not just which method took longest.
 - 🧠 **Heap / memory profiler** — `HEAP_ALLOCATE` bytes attributed to the method that allocated them, biggest-allocator callout, and peak-heap-vs-limit pressure warnings. The memory twin of the CPU profiler.
 - 🌊 **Flow / Process Builder analysis** — per-flow element timeline with timing, DB-bearing element markers, and "Flow element in loop" detection.
