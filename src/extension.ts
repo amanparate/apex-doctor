@@ -862,7 +862,7 @@ function openAnalysisPanel(
   const post = (message: unknown): void => {
     if (panelDisposed) { return; }
     try {
-      void post(message);
+      void panel.webview.postMessage(message);
     } catch {
       /* webview was disposed between the check and the call — ignore */
     }

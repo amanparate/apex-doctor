@@ -350,7 +350,7 @@ Apex Doctor supports five providers — pick one in settings (`apexDoctor.provid
 
 | Provider | Default model | Free tier? | Data leaves your org? |
 |---|---|---|---|
-| **OpenRouter** | `openrouter/free` (auto-routes to free models) | ✅ Yes | Yes — external |
+| **OpenRouter** | `google/gemma-4-31b-it:free` (free, auto-fallback to other free models) | ✅ Yes | Yes — external |
 | **Anthropic Claude** | `claude-sonnet-4-5` | ❌ Paid | Yes — external |
 | **OpenAI ChatGPT** | `gpt-4o-mini` | ❌ Paid | Yes — external |
 | **Google Gemini** | `gemini-2.0-flash` | ✅ Yes | Yes — external |

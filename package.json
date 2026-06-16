@@ -2,7 +2,7 @@
   "name": "apex-doctor",
   "displayName": "Apex Doctor",
   "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "publisher": "amanparate",
   "author": {
     "name": "Aman Parate",
@@ -277,8 +277,8 @@
         },
         "apexDoctor.model": {
           "type": "string",
-          "default": "openrouter/free",
-          "description": "Model name. Defaults per provider: openrouter/free (OpenRouter), claude-sonnet-4-5 (Anthropic), gpt-4o-mini (OpenAI), gemini-2.0-flash (Gemini), sfdc_ai__DefaultOpenAIGPT4OmniMini (Einstein — use any sfdc_ai__* model your org exposes). Leave empty to use the default for the selected provider."
+          "default": "",
+          "description": "Model name. Leave empty to use the best default for the selected provider: google/gemma-4-31b-it:free (OpenRouter — free, with automatic fallback to other free models), claude-sonnet-4-5 (Anthropic), gpt-4o-mini (OpenAI), gemini-2.0-flash (Gemini), sfdc_ai__DefaultOpenAIGPT4OmniMini (Einstein — use any sfdc_ai__* model your org exposes)."
         },
         "apexDoctor.einsteinDomain": {
           "type": "string",

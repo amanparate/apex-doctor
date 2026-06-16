@@ -5,6 +5,18 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] — 2026-06-16
+
+### Fixed
+
+- **AI analysis silently broken for every provider (regression since v0.12.1).** The disposal-safe `post()` helper added in v0.12.1 called *itself* instead of `panel.webview.postMessage()`, so it recursed until the stack overflowed and the error was swallowed — no AI message (streamed root-cause, follow-up chat, "Ask the Log", or Suggest Fix) ever reached the panel, and the Assistant drawer just hung. It now posts to the webview as intended, so replies stream again and real errors surface instead of being suppressed.
+- **OpenRouter requests rejected — `openrouter/free` is no longer a valid model.** OpenRouter removed that id from its catalogue, so every request failed with an unknown-model error. The default is now a current free model (`google/gemma-4-31b-it:free`), sent together with an OpenRouter `models` fallback array — if a free model rotates out (they change often), OpenRouter automatically tries the next instead of failing. Settings still holding `openrouter/free` are migrated to the current default automatically.
+- **`apexDoctor.model` leaking across providers.** The model setting is shared by all providers, but its default was an OpenRouter id — so selecting Anthropic / OpenAI / Gemini without setting a model sent that OpenRouter id to them too, failing the call. The default is now empty, so each provider falls back to its own correct default.
+
+### Tests
+
+- 56 passing (was 47): model resolution across providers (empty → default, retired-id migration, no cross-provider leak, Einstein isolation, explicit override) and the OpenRouter fallback-list shape.
+
 ## [0.12.2] — 2026-06-16
 
 ### Fixed

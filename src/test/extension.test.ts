@@ -6,7 +6,13 @@ import { detectRecurringPatterns } from "../recurringPatterns";
 import { linkAsyncChain, AsyncHistoryEntry } from "../asyncTracer";
 import { tryTemplatedFix } from "../fixTemplates";
 import { parseNlQueryResponse } from "../nlQuery";
-import { parseEinsteinResponse } from "../aiService";
+import {
+  parseEinsteinResponse,
+  resolveModelName,
+  openRouterModelList,
+  OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_FREE_FALLBACKS,
+} from "../aiService";
 import { diffEvents } from "../lineDiff";
 import { buildHeapProfile, formatBytes } from "../heapProfiler";
 import { extractFlows } from "../flowAnalysis";
@@ -589,5 +595,58 @@ suite("Einstein response parsing", () => {
 
   test("throws on an unrecognised shape", () => {
     assert.throws(() => parseEinsteinResponse(JSON.stringify({ nope: true })));
+  });
+});
+
+suite("Model resolution", () => {
+  test("empty setting → provider default (OpenRouter)", () => {
+    assert.strictEqual(resolveModelName("openrouter", ""), OPENROUTER_DEFAULT_MODEL);
+    assert.strictEqual(resolveModelName("openrouter", "   "), OPENROUTER_DEFAULT_MODEL);
+  });
+
+  test("retired openrouter/free id is migrated to the current default", () => {
+    assert.strictEqual(resolveModelName("openrouter", "openrouter/free"), OPENROUTER_DEFAULT_MODEL);
+  });
+
+  test("empty setting → each non-OpenRouter provider's own default (no leak)", () => {
+    assert.strictEqual(resolveModelName("anthropic", ""), "claude-sonnet-4-5");
+    assert.strictEqual(resolveModelName("openai", ""), "gpt-4o-mini");
+    assert.strictEqual(resolveModelName("gemini", ""), "gemini-2.0-flash");
+  });
+
+  test("an Einstein model name never leaks into a non-Einstein provider", () => {
+    assert.strictEqual(resolveModelName("openrouter", "sfdc_ai__DefaultOpenAIGPT4OmniMini"), OPENROUTER_DEFAULT_MODEL);
+    assert.strictEqual(resolveModelName("anthropic", "sfdc_ai__Whatever"), "claude-sonnet-4-5");
+  });
+
+  test("Einstein keeps an sfdc_ai__* model and defaults otherwise", () => {
+    assert.strictEqual(resolveModelName("einstein", "sfdc_ai__Custom"), "sfdc_ai__Custom");
+    assert.strictEqual(resolveModelName("einstein", ""), "sfdc_ai__DefaultOpenAIGPT4OmniMini");
+    assert.strictEqual(resolveModelName("einstein", "gpt-4o"), "sfdc_ai__DefaultOpenAIGPT4OmniMini");
+  });
+
+  test("an explicit user model override is respected", () => {
+    assert.strictEqual(resolveModelName("openrouter", "meta-llama/llama-3.3-70b-instruct"), "meta-llama/llama-3.3-70b-instruct");
+    assert.strictEqual(resolveModelName("openai", "gpt-4o"), "gpt-4o");
+  });
+});
+
+suite("OpenRouter fallback model list", () => {
+  test("default model expands to the free fallback array, primary first", () => {
+    const list = openRouterModelList(OPENROUTER_DEFAULT_MODEL);
+    assert.ok(Array.isArray(list));
+    assert.strictEqual(list![0], OPENROUTER_DEFAULT_MODEL);
+    assert.deepStrictEqual(list, OPENROUTER_FREE_FALLBACKS);
+    assert.ok(list!.every((m) => m.endsWith(":free")), "every fallback should be a :free model");
+  });
+
+  test("an explicit override sends a single model (no fallback array)", () => {
+    assert.strictEqual(openRouterModelList("meta-llama/llama-3.3-70b-instruct"), undefined);
+  });
+
+  test("returns a copy so callers cannot mutate the shared constant", () => {
+    const list = openRouterModelList(OPENROUTER_DEFAULT_MODEL)!;
+    list.push("tampered");
+    assert.strictEqual(OPENROUTER_FREE_FALLBACKS.includes("tampered"), false);
   });
 });

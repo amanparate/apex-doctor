@@ -9,6 +9,22 @@ const EINSTEIN_SECRET_KEY = "apexDoctor.einsteinConsumerSecret";
 const EINSTEIN_DEFAULT_MODEL = "sfdc_ai__DefaultOpenAIGPT4OmniMini";
 const EINSTEIN_API_VERSION = "v62.0";
 
+/**
+ * OpenRouter's free models rotate frequently, so any single hardcoded id rots —
+ * the long-standing default `openrouter/free` no longer exists in OpenRouter's
+ * catalogue, so it 400s every request. Default to a current free model and send
+ * the rest as an OpenRouter `models` fallback array: if the primary is gone,
+ * OpenRouter automatically tries the next one in order.
+ */
+export const OPENROUTER_DEFAULT_MODEL = "google/gemma-4-31b-it:free";
+export const OPENROUTER_FREE_FALLBACKS = [
+  OPENROUTER_DEFAULT_MODEL,
+  "google/gemma-4-26b-a4b-it:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+];
+/** Retired OpenRouter id that older user settings may still hold — migrate off it. */
+const RETIRED_OPENROUTER_MODEL = "openrouter/free";
+
 type Provider = "openrouter" | "anthropic" | "openai" | "gemini" | "einstein";
 
 interface ProviderConfig {
@@ -24,7 +40,7 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
     keyHint: "Starts with sk-or-. Get one FREE at openrouter.ai/keys",
     validateKey: (k) =>
       k.startsWith("sk-or-") ? null : "Must start with sk-or-",
-    defaultModel: "openrouter/free",
+    defaultModel: OPENROUTER_DEFAULT_MODEL,
   },
   anthropic: {
     label: "Anthropic (Claude)",
@@ -94,6 +110,36 @@ export function parseEinsteinResponse(raw: string): string {
   throw new Error("Unrecognised Einstein response shape.");
 }
 
+/**
+ * Resolve which model id to send for a provider, given the shared
+ * `apexDoctor.model` setting value. The setting is shared across every provider,
+ * so a value left over from another provider (an `sfdc_ai__*` Einstein model, or
+ * the retired `openrouter/free` id) must not leak through — fall back to the
+ * current provider's default in those cases, and when the setting is empty.
+ * Pure + exported for unit testing.
+ */
+export function resolveModelName(provider: Provider, configuredRaw: string): string {
+  const configured = (configuredRaw || "").trim();
+  const isEinsteinModel = configured.startsWith("sfdc_ai__");
+  if (provider === "einstein") {
+    return isEinsteinModel ? configured : PROVIDERS.einstein.defaultModel;
+  }
+  if (!configured || isEinsteinModel || configured === RETIRED_OPENROUTER_MODEL) {
+    return PROVIDERS[provider].defaultModel;
+  }
+  return configured;
+}
+
+/**
+ * OpenRouter-only: when the resolved model is the default (user hasn't overridden
+ * it), return a copy of the curated free-model fallback list so OpenRouter can
+ * fail over if the primary free model has rotated out; otherwise undefined, so
+ * the single explicitly-chosen model is sent as-is. Pure + exported for tests.
+ */
+export function openRouterModelList(resolvedModel: string): string[] | undefined {
+  return resolvedModel === OPENROUTER_DEFAULT_MODEL ? [...OPENROUTER_FREE_FALLBACKS] : undefined;
+}
+
 export class AiService {
   private einsteinToken: EinsteinToken | undefined;
 
@@ -113,16 +159,12 @@ export class AiService {
    * default in that case.
    */
   private resolveModel(provider: Provider): string {
-    const configured = (vscode.workspace.getConfiguration("apexDoctor").get<string>("model") || "").trim();
-    const isEinsteinModel = configured.startsWith("sfdc_ai__");
-    if (provider === "einstein") {
-      return isEinsteinModel ? configured : PROVIDERS.einstein.defaultModel;
-    }
-    // Non-Einstein provider: ignore an empty value or an Einstein model name.
-    if (!configured || isEinsteinModel) {
-      return PROVIDERS[provider].defaultModel;
-    }
-    return configured;
+    const configured = vscode.workspace.getConfiguration("apexDoctor").get<string>("model") || "";
+    return resolveModelName(provider, configured);
+  }
+
+  private openRouterModels(resolvedModel: string): string[] | undefined {
+    return openRouterModelList(resolvedModel);
   }
 
   async setApiKey(): Promise<boolean> {
@@ -426,6 +468,7 @@ ${this.buildContext(analysis)}`;
           {
             host: "openrouter.ai",
             path: "/api/v1/chat/completions",
+            models: this.openRouterModels(model),
             extraHeaders: {
               "HTTP-Referer": "https://github.com/amanparate/apex-doctor",
               "X-Title": "Apex Doctor",
@@ -486,6 +529,7 @@ ${this.buildContext(analysis)}`;
           {
             host: "openrouter.ai",
             path: "/api/v1/chat/completions",
+            models: this.openRouterModels(model),
             extraHeaders: {
               "HTTP-Referer": "https://github.com/amanparate/apex-doctor",
               "X-Title": "Apex Doctor",
@@ -580,7 +624,7 @@ ${this.buildContext(analysis)}`;
 
   /** Shared OpenAI-compatible SSE handler — used for both OpenRouter and OpenAI */
   private streamOpenAICompat(
-    target: { host: string; path: string; extraHeaders?: Record<string, string> },
+    target: { host: string; path: string; extraHeaders?: Record<string, string>; models?: string[] },
     apiKey: string,
     model: string,
     maxTokens: number,
@@ -591,7 +635,11 @@ ${this.buildContext(analysis)}`;
     onError: (e: string) => void,
   ) {
     const body = JSON.stringify({
-      model,
+      // OpenRouter accepts a `models` fallback array (primary first) and tries
+      // them in order; plain OpenAI takes a single `model`. Prefer the array
+      // when one is supplied so a rotated-out free model fails over instead of
+      // breaking the whole request.
+      ...(target.models && target.models.length ? { models: target.models } : { model }),
       max_tokens: maxTokens,
       stream: true,
       messages: [{ role: "system", content: system }, ...messages],
