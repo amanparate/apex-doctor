@@ -43,7 +43,7 @@ Paste any Salesforce Apex debug log into VS Code, right-click, and get an instan
 - 🔴 **Live streaming** — watch logs arrive from your org in real time
 - 🔀 **Compare two logs** — side-by-side diff for before / after optimisations
 - 🗂️ **Recent analyses** — last 10 analyses persisted per workspace, one click to reopen
-- 🤖 **AI root-cause + follow-up chat** — OpenRouter, Anthropic, OpenAI, or Google Gemini
+- 🤖 **AI root-cause + follow-up chat** — OpenRouter, Anthropic, OpenAI, Google Gemini, or **🛡️ Salesforce Einstein** (keeps all data inside your org's Trust Layer)
 
 ---
 
@@ -346,16 +346,35 @@ The initial response is structured into four sections:
 
 ### Choose your AI provider
 
-Apex Doctor supports four LLM providers — pick one in settings (`apexDoctor.provider`):
+Apex Doctor supports five providers — pick one in settings (`apexDoctor.provider`):
 
-| Provider | Default model | Free tier? |
-|---|---|---|
-| **OpenRouter** | `openrouter/free` (auto-routes to free models) | ✅ Yes |
-| **Anthropic Claude** | `claude-sonnet-4-5` | ❌ Paid |
-| **OpenAI ChatGPT** | `gpt-4o-mini` | ❌ Paid |
-| **Google Gemini** | `gemini-2.0-flash` | ✅ Yes |
+| Provider | Default model | Free tier? | Data leaves your org? |
+|---|---|---|---|
+| **OpenRouter** | `openrouter/free` (auto-routes to free models) | ✅ Yes | Yes — external |
+| **Anthropic Claude** | `claude-sonnet-4-5` | ❌ Paid | Yes — external |
+| **OpenAI ChatGPT** | `gpt-4o-mini` | ❌ Paid | Yes — external |
+| **Google Gemini** | `gemini-2.0-flash` | ✅ Yes | Yes — external |
+| **🛡️ Salesforce Einstein** | `sfdc_ai__DefaultGPT4OmniMini` | Uses your org's allocation | **No — stays in the Trust Layer** |
 
-API keys are stored in VS Code's encrypted SecretStorage — never written to disk in plaintext.
+API keys are stored in VS Code's encrypted SecretStorage — never written to disk in plaintext. Regardless of provider, Apex Doctor only ever sends a **distilled summary** of the log (issues, top SOQL, slowest methods, governor metrics), never the raw log.
+
+---
+
+## 🛡️ Salesforce Einstein — keep data in the Trust Layer
+
+**New in v0.12.0** — for teams whose security policy forbids sending org data to external AI, Apex Doctor can route every AI feature (root-cause, follow-up chat, Ask the Log, Suggest Fix) through your org's own **Einstein Models API**. The prompt stays inside the **Einstein Trust Layer** — zero data retention, PII masking, and no third-party model training — and uses your org's existing LLM allocation instead of an external API key.
+
+### One-time setup
+
+1. **Create an External Client App** in your org (Setup → App Manager / External Client Apps) with OAuth enabled and the **`sfap_api`** scope (plus `api`, `refresh_token`). Enable the **client-credentials** flow and assign a run-as user. Copy the **consumer key** and **consumer secret**.
+2. In VS Code settings:
+   - `apexDoctor.provider` → **`einstein`**
+   - `apexDoctor.einsteinDomain` → your My Domain host, e.g. `mycompany.my.salesforce.com` (no `https://`)
+   - `apexDoctor.einsteinConsumerKey` → the app's consumer key
+   - _(optional)_ `apexDoctor.model` → any `sfdc_ai__*` model your org exposes
+3. Run **"Apex Doctor: Set LLM API Key"** and paste the **consumer secret** (stored encrypted).
+
+That's it — the AI features now run through Einstein. Requires an org entitled for Einstein generative AI / Agentforce.
 
 ---
 

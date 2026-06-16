@@ -2,7 +2,7 @@
   "name": "apex-doctor",
   "displayName": "Apex Doctor",
   "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publisher": "amanparate",
   "author": {
     "name": "Aman Parate",
@@ -262,21 +262,33 @@
             "openrouter",
             "anthropic",
             "openai",
-            "gemini"
+            "gemini",
+            "einstein"
           ],
           "enumDescriptions": [
             "OpenRouter — free tier available, key starts with sk-or-",
             "Anthropic Claude — paid, key starts with sk-ant-",
             "OpenAI (ChatGPT) — paid, key starts with sk-",
-            "Google Gemini — free tier available, key starts with AIza"
+            "Google Gemini — free tier available, key starts with AIza",
+            "Salesforce Einstein — runs through your org's Einstein Trust Layer; data never leaves Salesforce. Requires an External Client App (see einsteinDomain / einsteinConsumerKey)."
           ],
           "default": "openrouter",
-          "description": "LLM provider. OpenRouter and Gemini both have free tiers."
+          "description": "LLM provider. OpenRouter and Gemini have free tiers; Einstein keeps all data inside the Salesforce Trust Layer."
         },
         "apexDoctor.model": {
           "type": "string",
           "default": "openrouter/free",
-          "description": "Model name. Defaults per provider: openrouter/free (OpenRouter auto-routes free models), claude-sonnet-4-5 (Anthropic), gpt-4o-mini (OpenAI), gemini-2.0-flash (Gemini). Leave empty to use the default for the selected provider."
+          "description": "Model name. Defaults per provider: openrouter/free (OpenRouter), claude-sonnet-4-5 (Anthropic), gpt-4o-mini (OpenAI), gemini-2.0-flash (Gemini), sfdc_ai__DefaultGPT4OmniMini (Einstein — use any sfdc_ai__* model your org exposes). Leave empty to use the default for the selected provider."
+        },
+        "apexDoctor.einsteinDomain": {
+          "type": "string",
+          "default": "",
+          "description": "Salesforce Einstein only. Your My Domain host, e.g. mycompany.my.salesforce.com (no https://). Used for the OAuth token exchange and the Models API call."
+        },
+        "apexDoctor.einsteinConsumerKey": {
+          "type": "string",
+          "default": "",
+          "description": "Salesforce Einstein only. The consumer key (client_id) of your External Client App that has the sfap_api OAuth scope. Store the matching consumer secret via 'Apex Doctor: Set LLM API Key'."
         },
         "apexDoctor.maxTokens": {
           "type": "number",

@@ -6,6 +6,7 @@ import { detectRecurringPatterns } from "../recurringPatterns";
 import { linkAsyncChain, AsyncHistoryEntry } from "../asyncTracer";
 import { tryTemplatedFix } from "../fixTemplates";
 import { parseNlQueryResponse } from "../nlQuery";
+import { parseEinsteinResponse } from "../aiService";
 import { diffEvents } from "../lineDiff";
 import { buildHeapProfile, formatBytes } from "../heapProfiler";
 import { extractFlows } from "../flowAnalysis";
@@ -563,5 +564,30 @@ suite("User journey", () => {
   test("unknown current source returns empty", () => {
     const history = [entryFor("a", "/tmp/a.log", "12:00:00.000")];
     assert.deepStrictEqual(detectJourney(history, "/tmp/zzz.log"), []);
+  });
+});
+
+suite("Einstein response parsing", () => {
+  test("parses the chat-generations generationDetails shape", () => {
+    const raw = JSON.stringify({
+      generationDetails: { generations: [{ content: "Root cause: null deref." }] },
+    });
+    assert.strictEqual(parseEinsteinResponse(raw), "Root cause: null deref.");
+  });
+
+  test("concatenates multiple generations", () => {
+    const raw = JSON.stringify({
+      generationDetails: { generations: [{ content: "part 1 " }, { content: "part 2" }] },
+    });
+    assert.strictEqual(parseEinsteinResponse(raw), "part 1 part 2");
+  });
+
+  test("falls back to the legacy generation.generatedText shape", () => {
+    const raw = JSON.stringify({ generation: { generatedText: "legacy text" } });
+    assert.strictEqual(parseEinsteinResponse(raw), "legacy text");
+  });
+
+  test("throws on an unrecognised shape", () => {
+    assert.throws(() => parseEinsteinResponse(JSON.stringify({ nope: true })));
   });
 });

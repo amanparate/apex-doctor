@@ -5,6 +5,19 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-06-16
+
+### Added
+
+- **🛡️ Salesforce Einstein provider (Trust Layer)** — a fifth AI option alongside OpenRouter / Anthropic / OpenAI / Gemini, for teams that can't send org data to external LLMs. Routes the root-cause analysis, follow-up chat, "Ask the Log", and Suggest-Fix prompts through your org's **Einstein Models API**, so data stays inside the Salesforce **Einstein Trust Layer** (zero-retention, PII masking, no third-party training). Uses your org's own LLM allocation — no external API key.
+  - Authenticates via an **External Client App** (OAuth client-credentials with the `sfap_api` scope). Configure `apexDoctor.einsteinDomain` (My Domain host) and `apexDoctor.einsteinConsumerKey` in Settings, then store the consumer secret via **"Apex Doctor: Set LLM API Key"** (kept in encrypted SecretStorage).
+  - Calls `POST {domain}/services/data/v62.0/models/{model}/chat-generations` through the Trust Layer, with an in-memory access-token cache. Default model `sfdc_ai__DefaultGPT4OmniMini` — set `apexDoctor.model` to any `sfdc_ai__*` model your org exposes.
+  - Requires an org entitled for Einstein generative AI / Agentforce.
+
+### Tests
+
+- 47 passing (was 43): Einstein response-shape parsing across the current and legacy formats.
+
 ## [0.11.0] — 2026-06-12
 
 ### Added

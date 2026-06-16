@@ -4,8 +4,12 @@ import { Analysis, Issue } from "./analyzer";
 
 const API_VERSION_ANTHROPIC = "2023-06-01";
 const SECRET_KEY = "apexDoctor.apiKey";
+/** Separate secret slot for the Einstein External Client App consumer secret. */
+const EINSTEIN_SECRET_KEY = "apexDoctor.einsteinConsumerSecret";
+const EINSTEIN_DEFAULT_MODEL = "sfdc_ai__DefaultGPT4OmniMini";
+const EINSTEIN_API_VERSION = "v62.0";
 
-type Provider = "openrouter" | "anthropic" | "openai" | "gemini";
+type Provider = "openrouter" | "anthropic" | "openai" | "gemini" | "einstein";
 
 interface ProviderConfig {
   label: string;
@@ -49,11 +53,50 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
     validateKey: (k) => (k.startsWith("AIza") ? null : "Must start with AIza"),
     defaultModel: "gemini-2.0-flash",
   },
+  einstein: {
+    label: "Salesforce Einstein (Trust Layer)",
+    keyHint:
+      "Paste your External Client App consumer SECRET. Set the domain + consumer key in Apex Doctor settings first.",
+    // The Einstein "key" is the consumer secret — no fixed prefix to validate.
+    validateKey: () => null,
+    defaultModel: EINSTEIN_DEFAULT_MODEL,
+  },
 };
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
+interface EinsteinToken {
+  accessToken: string;
+  instanceUrl: string;
+  expiresAt: number;
+}
+
+/**
+ * Parse the Models API chat-generations response defensively across the couple
+ * of shapes Salesforce has shipped. Exported for unit testing.
+ */
+export function parseEinsteinResponse(raw: string): string {
+  const json = JSON.parse(raw);
+  // Current shape: { generationDetails: { generations: [{ content }] } }
+  const gens = json?.generationDetails?.generations;
+  if (Array.isArray(gens) && gens.length && typeof gens[0]?.content === "string") {
+    return gens.map((g: { content?: string }) => g.content ?? "").join("");
+  }
+  // Older single-generation shape: { generation: { generatedText } }
+  if (typeof json?.generation?.generatedText === "string") {
+    return json.generation.generatedText;
+  }
+  // chat-generations sometimes nests under messages[]
+  const msg = json?.generationDetails?.messages?.[0]?.content ?? json?.messages?.[0]?.content;
+  if (typeof msg === "string") {
+    return msg;
+  }
+  throw new Error("Unrecognised Einstein response shape.");
+}
+
 export class AiService {
+  private einsteinToken: EinsteinToken | undefined;
+
   constructor(private secrets: vscode.SecretStorage) {}
 
   private getProvider(): Provider {
@@ -65,6 +108,10 @@ export class AiService {
   async setApiKey(): Promise<boolean> {
     const provider = this.getProvider();
     const cfg = PROVIDERS[provider];
+
+    if (provider === "einstein") {
+      return this.setEinsteinSecret();
+    }
 
     const key = await vscode.window.showInputBox({
       prompt: `Enter your ${cfg.label} API key. ${cfg.keyHint}`,
@@ -82,8 +129,40 @@ export class AiService {
     return true;
   }
 
+  private async setEinsteinSecret(): Promise<boolean> {
+    const config = vscode.workspace.getConfiguration("apexDoctor");
+    const domain = (config.get<string>("einsteinDomain") || "").trim();
+    const consumerKey = (config.get<string>("einsteinConsumerKey") || "").trim();
+    if (!domain || !consumerKey) {
+      vscode.window.showWarningMessage(
+        "Set apexDoctor.einsteinDomain and apexDoctor.einsteinConsumerKey in Settings before saving the consumer secret.",
+        "Open Settings",
+      ).then((c) => {
+        if (c === "Open Settings") {
+          vscode.commands.executeCommand("workbench.action.openSettings", "apexDoctor.einstein");
+        }
+      });
+      return false;
+    }
+    const secret = await vscode.window.showInputBox({
+      prompt: "Enter your Einstein External Client App consumer secret.",
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (v) => (v ? null : "Consumer secret is required"),
+    });
+    if (!secret) {
+      return false;
+    }
+    await this.secrets.store(EINSTEIN_SECRET_KEY, secret);
+    this.einsteinToken = undefined; // force re-auth with the new secret
+    vscode.window.showInformationMessage("Einstein consumer secret saved securely.");
+    return true;
+  }
+
   async clearApiKey(): Promise<void> {
     await this.secrets.delete(SECRET_KEY);
+    await this.secrets.delete(EINSTEIN_SECRET_KEY);
+    this.einsteinToken = undefined;
     vscode.window.showInformationMessage("API key cleared.");
   }
 
@@ -290,14 +369,20 @@ ${this.buildContext(analysis)}`;
     onDone: (fullText: string) => void,
     onError: (err: string) => void,
   ): Promise<void> {
+    const config = vscode.workspace.getConfiguration("apexDoctor");
+    const provider = this.getProvider();
+
+    // Einstein authenticates via the org (domain + consumer key/secret), not an API key.
+    if (provider === "einstein") {
+      const maxTokens = maxTokensOverride ?? config.get<number>("maxTokens") ?? 1500;
+      return this.generateEinstein(system, messages, maxTokens, onChunk, onDone, onError);
+    }
+
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       onError("No API key provided.");
       return;
     }
-
-    const config = vscode.workspace.getConfiguration("apexDoctor");
-    const provider = this.getProvider();
     const cfg = PROVIDERS[provider];
 
     if (apiKey) {
@@ -345,14 +430,21 @@ ${this.buildContext(analysis)}`;
     onDone: (fullText: string) => void,
     onError: (err: string) => void,
   ): Promise<void> {
+    const config = vscode.workspace.getConfiguration("apexDoctor");
+    const provider = this.getProvider();
+    const system = this.buildSystemPrompt(analysis);
+
+    // Einstein authenticates via the org, not an API key — handle it first.
+    if (provider === "einstein") {
+      const maxTokens = config.get<number>("maxTokens") || 1500;
+      return this.generateEinstein(system, messages, maxTokens, onChunk, onDone, onError);
+    }
+
     const apiKey = await this.getApiKey();
     if (!apiKey) {
       onError("No API key provided.");
       return;
     }
-
-    const config = vscode.workspace.getConfiguration("apexDoctor");
-    const provider = this.getProvider();
 
     // Defensive: catch the case where the saved key doesn't match the current provider
     const validation = PROVIDERS[provider].validateKey(apiKey);
@@ -365,7 +457,6 @@ ${this.buildContext(analysis)}`;
 
     const model = config.get<string>("model") || PROVIDERS[provider].defaultModel;
     const maxTokens = config.get<number>("maxTokens") || 1500;
-    const system = this.buildSystemPrompt(analysis);
 
     switch (provider) {
       case "anthropic":
@@ -611,4 +702,141 @@ ${this.buildContext(analysis)}`;
     req.write(body);
     req.end();
   }
+
+  // ───────────────────────── Salesforce Einstein (Trust Layer) ─────────────────────────
+
+  /**
+   * Non-streaming call to the Einstein Models API chat-generations endpoint,
+   * authenticated via an External Client App (OAuth client-credentials).
+   * Emits the full completion through onChunk once, then onDone — matching the
+   * streaming callback contract the webview already speaks.
+   */
+  private async generateEinstein(
+    system: string,
+    messages: ChatMessage[],
+    maxTokens: number,
+    onChunk: (t: string) => void,
+    onDone: (t: string) => void,
+    onError: (e: string) => void,
+  ): Promise<void> {
+    const config = vscode.workspace.getConfiguration("apexDoctor");
+    const domain = (config.get<string>("einsteinDomain") || "").trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const consumerKey = (config.get<string>("einsteinConsumerKey") || "").trim();
+    if (!domain || !consumerKey) {
+      onError(
+        "Einstein isn't configured. Set apexDoctor.einsteinDomain and apexDoctor.einsteinConsumerKey in Settings, then run 'Apex Doctor: Set LLM API Key' to store the consumer secret.",
+      );
+      return;
+    }
+    let secret = await this.secrets.get(EINSTEIN_SECRET_KEY);
+    if (!secret) {
+      const ok = await this.setEinsteinSecret();
+      if (ok) {
+        secret = await this.secrets.get(EINSTEIN_SECRET_KEY);
+      }
+    }
+    if (!secret) {
+      onError("No Einstein consumer secret provided.");
+      return;
+    }
+
+    let modelName = (config.get<string>("model") || "").trim();
+    if (!modelName || !modelName.startsWith("sfdc_ai__")) {
+      modelName = EINSTEIN_DEFAULT_MODEL;
+    }
+
+    try {
+      const token = await this.getEinsteinToken(domain, consumerKey, secret);
+      const host = token.instanceUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const body = JSON.stringify({
+        messages: [
+          { role: "system", content: system },
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+        localization: { defaultLocale: "en_US", inputLocales: [{ locale: "en_US", probability: 1 }], expectedLocales: ["en_US"] },
+        generationSettings: { maxTokens },
+      });
+      const res = await httpsJson({
+        host,
+        path: `/services/data/${EINSTEIN_API_VERSION}/models/${encodeURIComponent(modelName)}/chat-generations`,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.accessToken}`,
+          "Content-Type": "application/json;charset=utf-8",
+          "x-sfdc-app-context": "EinsteinGPT",
+          "x-client-feature-id": "ai-platform-models-connected-app",
+        },
+      }, body);
+
+      if (res.status >= 400) {
+        // A stale token? Drop the cache so the next attempt re-auths.
+        if (res.status === 401) {
+          this.einsteinToken = undefined;
+        }
+        onError(`Einstein HTTP ${res.status}: ${res.body.slice(0, 500)}`);
+        return;
+      }
+      const text = parseEinsteinResponse(res.body);
+      onChunk(text);
+      onDone(text);
+    } catch (e: any) {
+      onError(`Einstein request failed: ${e.message || e}`);
+    }
+  }
+
+  /** OAuth 2.0 client-credentials token, cached in-memory until ~1 min before expiry. */
+  private async getEinsteinToken(
+    domain: string,
+    consumerKey: string,
+    consumerSecret: string,
+  ): Promise<EinsteinToken> {
+    const now = Date.now();
+    if (this.einsteinToken && this.einsteinToken.expiresAt > now + 60_000) {
+      return this.einsteinToken;
+    }
+    const form =
+      `grant_type=client_credentials` +
+      `&client_id=${encodeURIComponent(consumerKey)}` +
+      `&client_secret=${encodeURIComponent(consumerSecret)}`;
+    const res = await httpsJson({
+      host: domain,
+      path: "/services/oauth2/token",
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    }, form);
+    if (res.status >= 400) {
+      throw new Error(`token exchange HTTP ${res.status}: ${res.body.slice(0, 300)}`);
+    }
+    const json = JSON.parse(res.body);
+    if (!json.access_token) {
+      throw new Error("token exchange returned no access_token");
+    }
+    // Salesforce tokens default ~2h; cache conservatively for 20 min.
+    this.einsteinToken = {
+      accessToken: json.access_token,
+      instanceUrl: (json.instance_url || `https://${domain}`).replace(/\/$/, ""),
+      expiresAt: now + 20 * 60_000,
+    };
+    return this.einsteinToken;
+  }
+}
+
+/** Minimal promise wrapper over https.request that buffers the whole response. */
+function httpsJson(
+  options: https.RequestOptions,
+  body: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      { ...options, headers: { ...options.headers, "Content-Length": Buffer.byteLength(body) } },
+      (res) => {
+        let buf = "";
+        res.on("data", (c) => (buf += c.toString()));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: buf }));
+      },
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
 }
