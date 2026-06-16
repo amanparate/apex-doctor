@@ -22,6 +22,8 @@ export interface AnalysisRenderOptions {
   recurring?: RecurringPatterns;
   asyncLinks?: AsyncLink[];
   journey?: JourneyEntry[];
+  /** Stable identity of the analysis being rendered; lets the webview drop persisted chat when the panel is reused for a different log. */
+  analysisId?: string;
 }
 
 function escapeHtml(s: string): string {
@@ -585,14 +587,25 @@ export function renderAnalysisHtml(a: Analysis, options: AnalysisRenderOptions =
       const chatSend = document.getElementById('chat-send');
       const spinner = document.getElementById('ai-spinner');
       const btnAll = document.getElementById('btn-explain-all');
+      const ANALYSIS_ID = ${JSON.stringify(options.analysisId ?? "")};
       const persisted = vscode.getState() || {};
+      // If the panel was reused for a different analysis (e.g. opened from
+      // Recent Logs or a journey chip), the persisted chat belongs to the
+      // previous log — drop it so a stale conversation doesn't bleed across logs.
+      if (persisted.analysisId !== ANALYSIS_ID) {
+        persisted.chatBubbles = [];
+        persisted.allAiText = '';
+      }
       let lastAiText = '';
       let activeAssistantText = '';
       let allAiText = persisted.allAiText || '';
       let chatBubbles = Array.isArray(persisted.chatBubbles) ? persisted.chatBubbles : [];
 
+      // Merge into existing state so we don't clobber sibling keys (e.g. the
+      // active tab persisted by the tab-switching script).
       function persistState() {
-        vscode.setState({ chatBubbles, allAiText });
+        const prev = vscode.getState() || {};
+        vscode.setState({ ...prev, chatBubbles, allAiText, analysisId: ANALYSIS_ID });
       }
 
       // Restore chat content silently — the drawer only opens on demand.

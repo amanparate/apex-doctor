@@ -60,13 +60,19 @@ function buildAsyncHistory(context: vscode.ExtensionContext): AsyncHistoryEntry[
 function computeRenderOptions(
   context: vscode.ExtensionContext,
   analysis: Analysis,
-): { recurring: RecurringPatterns; asyncLinks: AsyncLink[]; journey: JourneyEntry[] } {
+): { recurring: RecurringPatterns; asyncLinks: AsyncLink[]; journey: JourneyEntry[]; analysisId: string } {
   const history = loadHistory(context);
   const recurring = detectRecurringPatterns(history);
   const asyncHistory = buildAsyncHistory(context);
   const asyncLinks = linkAsyncChain(analysis.asyncInvocations, asyncHistory);
   const journey = detectJourney(history, currentLogUri?.fsPath);
-  return { recurring, asyncLinks, journey };
+  // Identity of the analysis being rendered — its log URI, or a content-derived
+  // fallback for in-memory analyses. Lets the webview tell when the panel has
+  // been reused for a different log and drop the previous log's chat.
+  const analysisId =
+    currentLogUri?.toString() ??
+    `mem:${analysis.summary.totalDurationMs}:${analysis.issues.length}:${analysis.soql.length}`;
+  return { recurring, asyncLinks, journey, analysisId };
 }
 
 function saveAnalysisToHistory(

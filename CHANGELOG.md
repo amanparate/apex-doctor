@@ -5,6 +5,14 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.4] — 2026-06-16
+
+### Fixed
+
+- **AI features could hang forever on a dropped connection.** The streaming HTTP handlers (and the Einstein request helper) listened for *request* errors but not *response*-stream errors, so a mid-stream network drop (e.g. `ECONNRESET`) went unhandled — `completeOnce`-based features ("Ask the Log", Suggest Fix) never resolved and spun indefinitely, and the stream error could surface as an uncaught exception. All response streams now route errors through the normal error path.
+- **Assistant chat bled across logs.** Opening a different log into an already-open analysis panel (from Recent Logs or a journey chip) reused the webview, whose persisted chat belonged to the *previous* log — so the new log's Assistant drawer showed the old conversation (and export emitted stale text). Persisted chat is now scoped to the analysis it came from and cleared when the panel switches logs.
+- **Active tab reset to Overview after any AI interaction.** Saving chat state overwrote the entire webview state, dropping the persisted active-tab key, so the panel jumped back to Overview on reload. State is now merged instead of overwritten.
+
 ## [0.12.3] — 2026-06-16
 
 ### Fixed

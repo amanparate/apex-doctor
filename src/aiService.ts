@@ -577,6 +577,7 @@ ${this.buildContext(analysis)}`;
         },
       },
       (res) => {
+        res.on("error", (e) => onError(e.message));
         if (res.statusCode && res.statusCode >= 400) {
           let errBody = "";
           res.on("data", (c) => (errBody += c.toString()));
@@ -657,6 +658,7 @@ ${this.buildContext(analysis)}`;
         },
       },
       (res) => {
+        res.on("error", (e) => onError(e.message));
         if (res.statusCode && res.statusCode >= 400) {
           let errBody = "";
           res.on("data", (c) => (errBody += c.toString()));
@@ -729,6 +731,7 @@ ${this.buildContext(analysis)}`;
         },
       },
       (res) => {
+        res.on("error", (e) => onError(e.message));
         if (res.statusCode && res.statusCode >= 400) {
           let errBody = "";
           res.on("data", (c) => (errBody += c.toString()));
@@ -896,6 +899,7 @@ function httpsJson(
       { ...options, headers: { ...options.headers, "Content-Length": Buffer.byteLength(body) } },
       (res) => {
         let buf = "";
+        res.on("error", reject);
         res.on("data", (c) => (buf += c.toString()));
         res.on("end", () => resolve({ status: res.statusCode ?? 0, body: buf }));
       },
