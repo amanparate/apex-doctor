@@ -6,7 +6,7 @@ const API_VERSION_ANTHROPIC = "2023-06-01";
 const SECRET_KEY = "apexDoctor.apiKey";
 /** Separate secret slot for the Einstein External Client App consumer secret. */
 const EINSTEIN_SECRET_KEY = "apexDoctor.einsteinConsumerSecret";
-const EINSTEIN_DEFAULT_MODEL = "sfdc_ai__DefaultGPT4OmniMini";
+const EINSTEIN_DEFAULT_MODEL = "sfdc_ai__DefaultOpenAIGPT4OmniMini";
 const EINSTEIN_API_VERSION = "v62.0";
 
 type Provider = "openrouter" | "anthropic" | "openai" | "gemini" | "einstein";
@@ -103,6 +103,26 @@ export class AiService {
     const config = vscode.workspace.getConfiguration("apexDoctor");
     const p = (config.get<string>("provider") || "openrouter") as Provider;
     return PROVIDERS[p] ? p : "openrouter";
+  }
+
+  /**
+   * Resolve which model to send. The `apexDoctor.model` setting is shared across
+   * every provider, so a value left over from a different provider (e.g. an
+   * `sfdc_ai__*` Einstein model selected earlier, then switching back to
+   * OpenRouter) must not leak through — fall back to the current provider's
+   * default in that case.
+   */
+  private resolveModel(provider: Provider): string {
+    const configured = (vscode.workspace.getConfiguration("apexDoctor").get<string>("model") || "").trim();
+    const isEinsteinModel = configured.startsWith("sfdc_ai__");
+    if (provider === "einstein") {
+      return isEinsteinModel ? configured : PROVIDERS.einstein.defaultModel;
+    }
+    // Non-Einstein provider: ignore an empty value or an Einstein model name.
+    if (!configured || isEinsteinModel) {
+      return PROVIDERS[provider].defaultModel;
+    }
+    return configured;
   }
 
   async setApiKey(): Promise<boolean> {
@@ -395,7 +415,7 @@ ${this.buildContext(analysis)}`;
       }
     }
 
-    const model = config.get<string>("model") || cfg.defaultModel;
+    const model = this.resolveModel(provider);
     const maxTokens = maxTokensOverride ?? config.get<number>("maxTokens") ?? 1500;
 
     switch (provider) {
@@ -455,7 +475,7 @@ ${this.buildContext(analysis)}`;
       return;
     }
 
-    const model = config.get<string>("model") || PROVIDERS[provider].defaultModel;
+    const model = this.resolveModel(provider);
     const maxTokens = config.get<number>("maxTokens") || 1500;
 
     switch (provider) {
@@ -740,10 +760,7 @@ ${this.buildContext(analysis)}`;
       return;
     }
 
-    let modelName = (config.get<string>("model") || "").trim();
-    if (!modelName || !modelName.startsWith("sfdc_ai__")) {
-      modelName = EINSTEIN_DEFAULT_MODEL;
-    }
+    const modelName = this.resolveModel("einstein");
 
     try {
       const token = await this.getEinsteinToken(domain, consumerKey, secret);
