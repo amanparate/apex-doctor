@@ -5,6 +5,12 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] — 2026-06-16
+
+### Fixed
+
+- **"Webview is disposed" error** when an AI response landed after the analysis panel was closed or replaced. The non-streaming Einstein path widened this race (its reply arrives a few seconds later), but it could affect any provider. All webview messages now route through a disposal-safe `post()` that no-ops once the panel is gone.
+
 ## [0.12.0] — 2026-06-16
 
 ### Added

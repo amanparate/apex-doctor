@@ -855,6 +855,19 @@ function openAnalysisPanel(
     computeRenderOptions(context, analysis),
   );
 
+  // Posting to a closed webview throws "Webview is disposed". Async AI callbacks
+  // (especially the non-streaming Einstein path) can land after the user closes
+  // or replaces the panel, so route every message through a disposal-safe post.
+  let panelDisposed = false;
+  const post = (message: unknown): void => {
+    if (panelDisposed) { return; }
+    try {
+      void post(message);
+    } catch {
+      /* webview was disposed between the check and the call — ignore */
+    }
+  };
+
   const startInitialExplanation = async (focusIssue?: import("./analyzer").Issue) => {
     if (!currentAnalysis) { return; }
     const userPrompt = ai.buildInitialUserPrompt(currentAnalysis, focusIssue);
@@ -865,13 +878,13 @@ function openAnalysisPanel(
       currentChat,
       (chunk) => {
         assistantText += chunk;
-        panel.webview.postMessage({ command: "aiChunk", text: chunk });
+        post({ command: "aiChunk", text: chunk });
       },
       () => {
         currentChat.push({ role: "assistant", content: assistantText });
-        panel.webview.postMessage({ command: "aiDone" });
+        post({ command: "aiDone" });
       },
-      (err) => panel.webview.postMessage({ command: "aiError", error: err }),
+      (err) => post({ command: "aiError", error: err }),
     );
   };
 
@@ -891,20 +904,20 @@ function openAnalysisPanel(
         currentChat = [{ role: "user", content: ai.buildInitialUserPrompt(currentAnalysis) }];
       }
       currentChat.push({ role: "user", content: userMessage });
-      panel.webview.postMessage({ command: "chatUserEcho", text: userMessage });
+      post({ command: "chatUserEcho", text: userMessage });
       let assistantText = "";
       await ai.streamChat(
         currentAnalysis,
         currentChat,
         (chunk) => {
           assistantText += chunk;
-          panel.webview.postMessage({ command: "aiChunk", text: chunk });
+          post({ command: "aiChunk", text: chunk });
         },
         () => {
           currentChat.push({ role: "assistant", content: assistantText });
-          panel.webview.postMessage({ command: "aiDone" });
+          post({ command: "aiDone" });
         },
-        (err) => panel.webview.postMessage({ command: "aiError", error: err }),
+        (err) => post({ command: "aiError", error: err }),
       );
     } else if (msg.command === "jumpToLine") {
       await jumpToLogLine(msg.line);
@@ -942,12 +955,12 @@ function openAnalysisPanel(
       if (!currentAnalysis) { return; }
       const question: string = (msg.text || "").trim();
       if (!question) { return; }
-      panel.webview.postMessage({ command: "askLogPending" });
+      post({ command: "askLogPending" });
       try {
         const prompt = buildNlQueryPrompt(currentAnalysis, question);
         const raw = await ai.completeOnce(prompt, { maxTokens: 800 });
         if (!raw) {
-          panel.webview.postMessage({
+          post({
             command: "askLogResult",
             error: "No response from the AI provider. Check your API key.",
           });
@@ -957,19 +970,19 @@ function openAnalysisPanel(
         try {
           result = parseNlQueryResponse(currentAnalysis, raw);
         } catch (e: any) {
-          panel.webview.postMessage({
+          post({
             command: "askLogResult",
             error: `Couldn't parse the AI response: ${e.message}`,
             raw: raw.slice(0, 400),
           });
           return;
         }
-        panel.webview.postMessage({
+        post({
           command: "askLogResult",
           result,
         });
       } catch (e: any) {
-        panel.webview.postMessage({
+        post({
           command: "askLogResult",
           error: e.message || "Unknown error.",
         });
@@ -978,6 +991,7 @@ function openAnalysisPanel(
   });
 
   panel.onDidDispose(() => {
+    panelDisposed = true;
     currentPanel = undefined;
     currentAnalysis = undefined;
     currentLogUri = undefined;
