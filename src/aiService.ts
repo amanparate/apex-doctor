@@ -22,8 +22,13 @@ export const OPENROUTER_FREE_FALLBACKS = [
   "google/gemma-4-26b-a4b-it:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
 ];
-/** Retired OpenRouter id that older user settings may still hold — migrate off it. */
-const RETIRED_OPENROUTER_MODEL = "openrouter/free";
+/**
+ * Model ids that providers have retired but older user settings may still hold —
+ * migrate them to the current provider default instead of sending a dead id.
+ * openrouter/free: removed from OpenRouter's catalogue (was our default ≤ v0.12.2).
+ * gemini-2.0-flash(-lite): shut down by Google on 2026-06-01 (was our Gemini default ≤ v0.12.4).
+ */
+const RETIRED_MODELS = new Set(["openrouter/free", "gemini-2.0-flash", "gemini-2.0-flash-lite"]);
 
 type Provider = "openrouter" | "anthropic" | "openai" | "gemini" | "einstein";
 
@@ -67,7 +72,7 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
     label: "Google Gemini",
     keyHint: "Starts with AIza. Get one FREE at aistudio.google.com/apikey",
     validateKey: (k) => (k.startsWith("AIza") ? null : "Must start with AIza"),
-    defaultModel: "gemini-2.0-flash",
+    defaultModel: "gemini-3.5-flash",
   },
   einstein: {
     label: "Salesforce Einstein (Trust Layer)",
@@ -113,8 +118,8 @@ export function parseEinsteinResponse(raw: string): string {
 /**
  * Resolve which model id to send for a provider, given the shared
  * `apexDoctor.model` setting value. The setting is shared across every provider,
- * so a value left over from another provider (an `sfdc_ai__*` Einstein model, or
- * the retired `openrouter/free` id) must not leak through — fall back to the
+ * so a value left over from another provider (an `sfdc_ai__*` Einstein model) or
+ * a retired id (see RETIRED_MODELS) must not leak through — fall back to the
  * current provider's default in those cases, and when the setting is empty.
  * Pure + exported for unit testing.
  */
@@ -124,7 +129,7 @@ export function resolveModelName(provider: Provider, configuredRaw: string): str
   if (provider === "einstein") {
     return isEinsteinModel ? configured : PROVIDERS.einstein.defaultModel;
   }
-  if (!configured || isEinsteinModel || configured === RETIRED_OPENROUTER_MODEL) {
+  if (!configured || isEinsteinModel || RETIRED_MODELS.has(configured)) {
     return PROVIDERS[provider].defaultModel;
   }
   return configured;

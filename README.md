@@ -353,7 +353,7 @@ Apex Doctor supports five providers — pick one in settings (`apexDoctor.provid
 | **OpenRouter** | `google/gemma-4-31b-it:free` (free, auto-fallback to other free models) | ✅ Yes | Yes — external |
 | **Anthropic Claude** | `claude-sonnet-4-5` | ❌ Paid | Yes — external |
 | **OpenAI ChatGPT** | `gpt-4o-mini` | ❌ Paid | Yes — external |
-| **Google Gemini** | `gemini-2.0-flash` | ✅ Yes | Yes — external |
+| **Google Gemini** | `gemini-3.5-flash` | ✅ Yes | Yes — external |
 | **🛡️ Salesforce Einstein** | `sfdc_ai__DefaultGPT4OmniMini` | Uses your org's allocation | **No — stays in the Trust Layer** |
 
 API keys are stored in VS Code's encrypted SecretStorage — never written to disk in plaintext. Regardless of provider, Apex Doctor only ever sends a **distilled summary** of the log (issues, top SOQL, slowest methods, governor metrics), never the raw log.

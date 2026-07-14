@@ -608,10 +608,17 @@ suite("Model resolution", () => {
     assert.strictEqual(resolveModelName("openrouter", "openrouter/free"), OPENROUTER_DEFAULT_MODEL);
   });
 
+  test("retired Gemini ids are migrated to the current provider default", () => {
+    assert.strictEqual(resolveModelName("gemini", "gemini-2.0-flash"), "gemini-3.5-flash");
+    assert.strictEqual(resolveModelName("gemini", "gemini-2.0-flash-lite"), "gemini-3.5-flash");
+    // A retired id left over from another provider must not leak either.
+    assert.strictEqual(resolveModelName("openrouter", "gemini-2.0-flash"), OPENROUTER_DEFAULT_MODEL);
+  });
+
   test("empty setting → each non-OpenRouter provider's own default (no leak)", () => {
     assert.strictEqual(resolveModelName("anthropic", ""), "claude-sonnet-4-5");
     assert.strictEqual(resolveModelName("openai", ""), "gpt-4o-mini");
-    assert.strictEqual(resolveModelName("gemini", ""), "gemini-2.0-flash");
+    assert.strictEqual(resolveModelName("gemini", ""), "gemini-3.5-flash");
   });
 
   test("an Einstein model name never leaks into a non-Einstein provider", () => {

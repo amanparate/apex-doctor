@@ -5,6 +5,16 @@ All notable changes to Apex Doctor will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.5] — 2026-07-14
+
+### Fixed
+
+- **Gemini provider broken — `gemini-2.0-flash` was shut down by Google (June 1, 2026).** The default Gemini model no longer exists, so every request on the default failed. The default is now **`gemini-3.5-flash`** (Google's current stable Flash model), and settings still holding the retired `gemini-2.0-flash` / `gemini-2.0-flash-lite` ids are migrated to the current default automatically — the same treatment `openrouter/free` got in v0.12.3. The other provider defaults were re-verified against live sources: `gpt-4o-mini` and `claude-sonnet-4-5` both remain valid.
+
+### Tests
+
+- 57 passing (was 56): retired-Gemini-id migration, including the cross-provider leak case.
+
 ## [0.12.4] — 2026-06-16
 
 ### Fixed
