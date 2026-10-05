@@ -2,7 +2,7 @@
   "name": "apex-doctor",
   "displayName": "Apex Doctor",
   "description": "Diagnose Salesforce Apex debug logs in seconds. AI root-cause analysis, performance insights, live log streaming, SOQL-in-loop detection, activity timeline, and one-click navigation to Apex source.",
-  "version": "0.12.5",
+  "version": "0.13.0",
   "publisher": "amanparate",
   "author": {
     "name": "Aman Parate",
@@ -25,21 +25,11 @@
   "engines": {
     "vscode": "^1.116.0"
   },
-  "categories": [
-    "Other",
-    "Visualization"
-  ],
+  "categories": ["Debuggers", "Visualization", "AI", "Testing"],
   "keywords": [
-    "salesforce",
-    "apex",
-    "sfdx",
-    "debug log",
-    "log analyzer",
-    "ai",
-    "claude",
-    "openrouter",
-    "performance",
-    "soql"
+    "salesforce", "apex", "debug log", "apex log", "log analyzer",
+    "soql", "query plan", "profiler", "governor limits", "sfdx",
+    "trace flag", "einstein", "ai", "performance"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
@@ -130,6 +120,17 @@
       {
         "command": "apexDoctor.runAnonymousApex",
         "title": "Run This Anonymous Apex",
+        "category": "Apex Doctor"
+      },
+      {
+        "command": "apexDoctor.trySampleLog",
+        "title": "Try with Sample Log",
+        "category": "Apex Doctor",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "apexDoctor.openWalkthrough",
+        "title": "Open Getting Started Guide",
         "category": "Apex Doctor"
       }
     ],
@@ -244,6 +245,12 @@
           "command": "apexDoctor.runAnonymousApex"
         },
         {
+          "command": "apexDoctor.trySampleLog"
+        },
+        {
+          "command": "apexDoctor.openWalkthrough"
+        },
+        {
           "command": "apexDoctor.openRecent",
           "when": "false"
         },
@@ -253,6 +260,56 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "apexDoctor.currentAnalysis",
+        "contents": "No log analysed yet.\n[Try with Sample Log](command:apexDoctor.trySampleLog)\n[Fetch Log from Salesforce](command:apexDoctor.fetchLog)\n[Getting Started Guide](command:apexDoctor.openWalkthrough)"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "apexDoctor.gettingStarted",
+        "title": "Get started with Apex Doctor",
+        "description": "Diagnose your first Apex debug log in under a minute.",
+        "steps": [
+          {
+            "id": "trySample",
+            "title": "See it in action — no org needed",
+            "description": "Open a bundled sample log containing a SOQL-in-loop, a large query, a callout and a NullPointerException, and analyse it instantly.\n[Try with Sample Log](command:apexDoctor.trySampleLog)",
+            "media": { "markdown": "media/walkthrough/sample.md" },
+            "completionEvents": ["onCommand:apexDoctor.trySampleLog"]
+          },
+          {
+            "id": "connectOrg",
+            "title": "Connect your Salesforce org",
+            "description": "Install the Salesforce CLI and log in once. Apex Doctor uses it for fetching logs, streaming, trace flags and query plans — it never handles your credentials itself.\n[Open Terminal](command:workbench.action.terminal.new)\n[Fetch a Log from Salesforce](command:apexDoctor.fetchLog)",
+            "media": { "markdown": "media/walkthrough/connect.md" },
+            "completionEvents": ["onCommand:apexDoctor.fetchLog"]
+          },
+          {
+            "id": "setupAi",
+            "title": "Turn on AI root-cause analysis",
+            "description": "Pick a provider — OpenRouter and Gemini have free tiers, Einstein keeps everything inside your org.\n[Choose Provider](command:workbench.action.openSettings?%5B%22apexDoctor.provider%22%5D)\n[Set API Key](command:apexDoctor.setApiKey)",
+            "media": { "markdown": "media/walkthrough/ai.md" },
+            "completionEvents": ["onCommand:apexDoctor.setApiKey"]
+          },
+          {
+            "id": "stream",
+            "title": "Trace a user and stream their logs",
+            "description": "Turn on debug logging for any user without opening Setup, then watch their logs arrive live.\n[Manage Trace Flags](command:apexDoctor.manageTraceFlags)\n[Start Streaming](command:apexDoctor.startStream)",
+            "media": { "markdown": "media/walkthrough/stream.md" },
+            "completionEvents": ["onCommand:apexDoctor.startStream"]
+          },
+          {
+            "id": "compare",
+            "title": "Prove your fix worked",
+            "description": "Compare a before and after log to see the speed-up, resolved issues, and exactly which execution path changed.\n[Compare Two Logs](command:apexDoctor.compareLogs)",
+            "media": { "markdown": "media/walkthrough/compare.md" },
+            "completionEvents": ["onCommand:apexDoctor.compareLogs"]
+          }
+        ]
+      }
+    ],
     "configuration": {
       "title": "Apex Doctor",
       "properties": {
@@ -337,7 +394,8 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "npm run docs && npm run package",
+    "docs": "node scripts/gen-docs.js",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",

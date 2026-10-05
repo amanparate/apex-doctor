@@ -170,10 +170,15 @@ async function generateAiFix(
 }
 
 function guessClassNameFromIssue(issue: Issue): string | undefined {
+  // Analyzer stamps this from the METHOD_ENTRY stack at the time of the
+  // offending event — the most reliable source. Fall back to the exception
+  // stack trace, then to a context/message regex for anything older.
+  if (issue.enclosingClass) {
+    return issue.enclosingClass;
+  }
   if (issue.stackFrames && issue.stackFrames.length) {
     return issue.stackFrames[0].className;
   }
-  // Try the issue context: many of our heuristics include a class hint.
   const m =
     issue.context?.match(/\b([A-Z][A-Za-z0-9_]*)\.\w+/) ??
     issue.message.match(/\b([A-Z][A-Za-z0-9_]*)\.\w+/);

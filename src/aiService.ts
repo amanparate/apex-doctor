@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as https from "https";
 import { Analysis, Issue } from "./analyzer";
+import { isModelUnavailableError, findFallbackModel } from "./modelFallback";
 
 const API_VERSION_ANTHROPIC = "2023-06-01";
 const SECRET_KEY = "apexDoctor.apiKey";
@@ -147,8 +148,23 @@ export function openRouterModelList(resolvedModel: string): string[] | undefined
 
 export class AiService {
   private einsteinToken: EinsteinToken | undefined;
+  /** Model swapped in for this VS Code session after the configured one failed. */
+  private sessionModel: Partial<Record<Provider, string>> = {};
 
   constructor(private secrets: vscode.SecretStorage) {}
+
+  /**
+   * Drop any session fallback. Call when the user edits apexDoctor.model or
+   * apexDoctor.provider — otherwise their new setting would be shadowed by the
+   * fallback that was picked when the old setting failed.
+   */
+  resetSessionModel(provider?: Provider): void {
+    if (provider) {
+      delete this.sessionModel[provider];
+    } else {
+      this.sessionModel = {};
+    }
+  }
 
   private getProvider(): Provider {
     const config = vscode.workspace.getConfiguration("apexDoctor");
@@ -503,6 +519,8 @@ ${this.buildContext(analysis)}`;
     const system = this.buildSystemPrompt(analysis);
 
     // Einstein authenticates via the org, not an API key — handle it first.
+    // Einstein is intentionally excluded from the fallback flow: it uses whichever
+    // model id the user has provisioned in their org, so there's nothing to swap to.
     if (provider === "einstein") {
       const maxTokens = config.get<number>("maxTokens") || 1500;
       return this.generateEinstein(system, messages, maxTokens, onChunk, onDone, onError);
@@ -523,33 +541,88 @@ ${this.buildContext(analysis)}`;
       return;
     }
 
-    const model = this.resolveModel(provider);
+    // Prefer the session fallback if an earlier call swapped the model for this
+    // provider; otherwise resolve from settings as normal.
+    const model = this.sessionModel[provider] || this.resolveModel(provider);
     const maxTokens = config.get<number>("maxTokens") || 1500;
 
-    switch (provider) {
-      case "anthropic":
-        return this.streamAnthropic(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
-      case "openrouter":
-        return this.streamOpenAICompat(
-          {
-            host: "openrouter.ai",
-            path: "/api/v1/chat/completions",
-            models: this.openRouterModels(model),
-            extraHeaders: {
-              "HTTP-Referer": "https://github.com/amanparate/apex-doctor",
-              "X-Title": "Apex Doctor",
+    let retried = false;
+
+    const dispatch = (m: string): void | Promise<void> => {
+      switch (provider) {
+        case "anthropic":
+          return this.streamAnthropic(apiKey, m, maxTokens, system, messages, onChunk, onDone, handleError);
+        case "openrouter":
+          return this.streamOpenAICompat(
+            {
+              host: "openrouter.ai",
+              path: "/api/v1/chat/completions",
+              // Once we've swapped in a fallback model, skip the curated
+              // free-model `models` array — the single swap target wins.
+              models: this.sessionModel[provider] ? undefined : this.openRouterModels(m),
+              extraHeaders: {
+                "HTTP-Referer": "https://github.com/amanparate/apex-doctor",
+                "X-Title": "Apex Doctor",
+              },
             },
-          },
-          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
+            apiKey, m, maxTokens, system, messages, onChunk, onDone, handleError,
+          );
+        case "openai":
+          return this.streamOpenAICompat(
+            { host: "api.openai.com", path: "/v1/chat/completions" },
+            apiKey, m, maxTokens, system, messages, onChunk, onDone, handleError,
+          );
+        case "gemini":
+          return this.streamGemini(apiKey, m, maxTokens, system, messages, onChunk, onDone, handleError);
+      }
+    };
+
+    // Track the first model so the "fallback also failed" error can name both.
+    let fallbackModel: string | undefined;
+
+    const handleError = async (err: string) => {
+      // If the fallback itself failed, make it obvious what happened —
+      // otherwise the user sees a raw HTTP error with no mention that we
+      // already swapped once.
+      if (retried && fallbackModel) {
+        onError(
+          `Fallback model "${fallbackModel}" also failed: ${err}\n\nSet apexDoctor.model to a valid id and try again.`,
         );
-      case "openai":
-        return this.streamOpenAICompat(
-          { host: "api.openai.com", path: "/v1/chat/completions" },
-          apiKey, model, maxTokens, system, messages, onChunk, onDone, onError,
+        return;
+      }
+      const canFallback = provider === "gemini" || provider === "openrouter";
+      if (!retried && canFallback && isModelUnavailableError(err)) {
+        retried = true;
+        console.log(`[Apex Doctor] model "${model}" failed, searching ${provider} catalogue for a replacement…`);
+        let fallback: string | undefined;
+        try {
+          fallback = await findFallbackModel(provider, apiKey, model);
+        } catch (e: any) {
+          console.error(`[Apex Doctor] fallback search failed:`, e);
+          onError(
+            `${err}\n\nFallback search also failed: ${e?.message || e}. Set apexDoctor.model to a valid id and try again.`,
+          );
+          return;
+        }
+        if (fallback) {
+          console.log(`[Apex Doctor] swapped to "${fallback}" for this session.`);
+          fallbackModel = fallback;
+          this.sessionModel[provider] = fallback;
+          vscode.window.showInformationMessage(
+            `Apex Doctor: model "${model}" isn't available on your key — switched to "${fallback}" for this session. Set apexDoctor.model to make it permanent.`,
+          );
+          return dispatch(fallback);
+        }
+        console.warn(`[Apex Doctor] no fallback model found for ${provider}.`);
+        onError(
+          `${err}\n\nNo working free model found on your ${provider} key. Set apexDoctor.model to a valid id and try again.`,
         );
-      case "gemini":
-        return this.streamGemini(apiKey, model, maxTokens, system, messages, onChunk, onDone, onError);
-    }
+        return;
+      }
+      onError(err);
+    };
+
+    return dispatch(model);
   }
 
   private streamAnthropic(
@@ -672,6 +745,12 @@ ${this.buildContext(analysis)}`;
         }
         let buffer = "";
         let fullText = "";
+        // OpenRouter returns HTTP 200 even when every model in the `models`
+        // fallback array fails — it emits the error as an SSE payload. If we
+        // don't surface those, onDone fires with "" and the UI silently
+        // stalls. Track both the first SSE error and whether any content
+        // ever arrived.
+        let streamError: string | undefined;
         res.on("data", (chunk: Buffer) => {
           buffer += chunk.toString();
           const parts = buffer.split("\n\n");
@@ -687,6 +766,13 @@ ${this.buildContext(analysis)}`;
               }
               try {
                 const evt = JSON.parse(payload);
+                if (evt.error && !streamError) {
+                  // Shape: { error: { message, code, metadata? } } (OpenRouter / OpenAI)
+                  const msg = evt.error.message || JSON.stringify(evt.error);
+                  const code = evt.error.code ? ` (${evt.error.code})` : "";
+                  streamError = `Stream error${code}: ${msg}`;
+                  continue;
+                }
                 const delta = evt.choices?.[0]?.delta?.content;
                 if (typeof delta === "string" && delta.length > 0) {
                   fullText += delta;
@@ -698,7 +784,17 @@ ${this.buildContext(analysis)}`;
             }
           }
         });
-        res.on("end", () => onDone(fullText));
+        res.on("end", () => {
+          if (streamError) {
+            onError(streamError);
+          } else if (!fullText) {
+            onError(
+              "The provider returned no content. The requested model may be unavailable or your free quota is exhausted.",
+            );
+          } else {
+            onDone(fullText);
+          }
+        });
       },
     );
     req.on("error", (e) => onError(e.message));
@@ -745,6 +841,7 @@ ${this.buildContext(analysis)}`;
         }
         let buffer = "";
         let fullText = "";
+        let streamError: string | undefined;
         res.on("data", (chunk: Buffer) => {
           buffer += chunk.toString();
           const parts = buffer.split("\n\n");
@@ -760,6 +857,11 @@ ${this.buildContext(analysis)}`;
               }
               try {
                 const evt = JSON.parse(payload);
+                if (evt.error && !streamError) {
+                  const msg = evt.error.message || JSON.stringify(evt.error);
+                  streamError = `Gemini stream error: ${msg}`;
+                  continue;
+                }
                 const text = evt.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (typeof text === "string" && text.length > 0) {
                   fullText += text;
@@ -771,7 +873,17 @@ ${this.buildContext(analysis)}`;
             }
           }
         });
-        res.on("end", () => onDone(fullText));
+        res.on("end", () => {
+          if (streamError) {
+            onError(streamError);
+          } else if (!fullText) {
+            onError(
+              "Gemini returned no content. The model may be unavailable or your free quota is exhausted.",
+            );
+          } else {
+            onDone(fullText);
+          }
+        });
       },
     );
     req.on("error", (e) => onError(e.message));

@@ -39,6 +39,8 @@ import {
   refreshStatusBarVisibility,
   disposeStatusBarItem,
 } from "./anonymousApex";
+import { openSampleLog, isSampleUri } from "./sampleLog";
+import { registerReviewState, maybeAskForReview } from "./reviewPrompt";
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentAnalysis: Analysis | undefined;
@@ -148,6 +150,7 @@ function isApexLogText(text: string): boolean {
 export function activate(context: vscode.ExtensionContext) {
   const parser = new ApexLogParser();
   const analyzer = new ApexDoctor();
+  registerReviewState(context);
   diagnosticCollection = vscode.languages.createDiagnosticCollection("apexDoctor");
   context.subscriptions.push(diagnosticCollection);
   recentProvider = new RecentAnalysesProvider(context);
@@ -182,6 +185,16 @@ export function activate(context: vscode.ExtensionContext) {
   );
   const sf = new SalesforceService();
   const ai = new AiService(context.secrets);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (
+        e.affectsConfiguration("apexDoctor.model") ||
+        e.affectsConfiguration("apexDoctor.provider")
+      ) {
+        ai.resetSessionModel();
+      }
+    }),
+  );
   const classResolver = new ApexClassResolver();
   const compareService = new CompareService();
   const streaming = new StreamingService(sf);
@@ -775,6 +788,18 @@ export function activate(context: vscode.ExtensionContext) {
     queryPlanCmd,
     openAnonymousEditorCmd,
     runAnonymousApexCmd,
+    vscode.commands.registerCommand("apexDoctor.trySampleLog", () =>
+      openSampleLog(context),
+    ),
+    vscode.commands.registerCommand("apexDoctor.openWalkthrough", () =>
+      vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        // Lowercased to match Open VSX's normalisation; the Marketplace
+        // publisher is "AmanParate" but IDs are compared case-insensitively.
+        `${context.extension.id.toLowerCase()}#apexDoctor.gettingStarted`,
+        false,
+      ),
+    ),
   );
 }
 
@@ -823,6 +848,9 @@ async function analyzeText(
       currentChat = [];
       publishDiagnostics(uri, text, analysis);
       saveAnalysisToHistory(context, uri, analysis);
+      if (!isSampleUri(uri)) {
+        void maybeAskForReview(context);
+      }
       currentAnalysisProvider?.refresh();
       openAnalysisPanel(context, analysis, ai, sf, classResolver);
     },

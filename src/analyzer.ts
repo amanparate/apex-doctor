@@ -25,6 +25,10 @@ export interface Issue {
   timestamp: string;
   context?: string;
   stackFrames?: StackFrame[];
+  /** Apex class running when this issue fired — used by Suggest Fix to locate the .cls. */
+  enclosingClass?: string;
+  /** Fully-qualified method (ClassName.methodName(args)) if known. */
+  enclosingMethod?: string;
 }
 
 export interface TestResult {
@@ -36,8 +40,8 @@ export interface TestResult {
   timestamp: string;
 }
 
-export interface SoqlEntry { query: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; }
-export interface DmlEntry { operation: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; }
+export interface SoqlEntry { query: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; enclosingClass?: string; enclosingMethod?: string; }
+export interface DmlEntry { operation: string; rows?: number; durationMs?: number; lineNumber?: number; timestamp: string; enclosingClass?: string; enclosingMethod?: string; }
 export interface MethodEntry { name: string; lineNumber?: number; durationMs: number; timestamp: string; }
 export interface DebugEntry { level: string; message: string; lineNumber?: number; timestamp: string; }
 
@@ -111,9 +115,27 @@ export class ApexDoctor {
 
     // Parallel stacks for durations
     const methodStack: { ev: LogEvent; name: string }[] = [];
-    const soqlStack: { ev: LogEvent; query: string }[] = [];
-    const dmlStack: { ev: LogEvent; op: string; rows?: number }[] = [];
+    const soqlStack: { ev: LogEvent; query: string; enclosingMethod?: string }[] = [];
+    const dmlStack: { ev: LogEvent; op: string; rows?: number; enclosingMethod?: string }[] = [];
     const codeUnitStack: { ev: LogEvent; name: string }[] = [];
+
+    // Snapshot the innermost user-code method running right now. Skips built-in
+    // platform frames (System.*, Database.*) which aren't resolvable to a .cls.
+    const currentEnclosingMethod = (): string | undefined => {
+      for (let i = methodStack.length - 1; i >= 0; i--) {
+        const name = methodStack[i].name;
+        if (!name) { continue; }
+        const firstSegment = name.split('(')[0].split('.')[0];
+        if (
+          firstSegment === 'System' ||
+          firstSegment === 'Database' ||
+          firstSegment === 'Schema' ||
+          firstSegment === 'Limits'
+        ) { continue; }
+        return name;
+      }
+      return undefined;
+    };
 
     // Flame-graph tree built via an "active" stack
     const flameRoot: FlameNode = {
@@ -195,7 +217,7 @@ export class ApexDoctor {
         case 'SOQL_EXECUTE_BEGIN': {
           const parts = ev.details.split('|');
           const query = parts[parts.length - 1] || ev.details;
-          soqlStack.push({ ev, query });
+          soqlStack.push({ ev, query, enclosingMethod: currentEnclosingMethod() });
           openNode(ev, `SOQL: ${query.slice(0, 60)}…`, 'soql');
           break;
         }
@@ -207,7 +229,9 @@ export class ApexDoctor {
             rows: rowsMatch ? Number(rowsMatch[1]) : undefined,
             durationMs: opened ? (ev.nanoseconds - opened.ev.nanoseconds) / 1e6 : undefined,
             lineNumber: opened?.ev.lineNumber,
-            timestamp: opened?.ev.timestamp || ev.timestamp
+            timestamp: opened?.ev.timestamp || ev.timestamp,
+            enclosingMethod: opened?.enclosingMethod,
+            enclosingClass: classFromMethod(opened?.enclosingMethod),
           });
           closeNode(ev);
           break;
@@ -217,7 +241,7 @@ export class ApexDoctor {
           const opMatch = /Op:(\w+)/.exec(ev.details);
           const rowsMatch = /Rows:(\d+)/.exec(ev.details);
           const op = opMatch ? opMatch[1] : 'UNKNOWN';
-          dmlStack.push({ ev, op, rows: rowsMatch ? Number(rowsMatch[1]) : undefined });
+          dmlStack.push({ ev, op, rows: rowsMatch ? Number(rowsMatch[1]) : undefined, enclosingMethod: currentEnclosingMethod() });
           openNode(ev, `DML: ${op}`, 'dml');
           break;
         }
@@ -228,7 +252,9 @@ export class ApexDoctor {
             rows: opened?.rows,
             durationMs: opened ? (ev.nanoseconds - opened.ev.nanoseconds) / 1e6 : undefined,
             lineNumber: opened?.ev.lineNumber,
-            timestamp: opened?.ev.timestamp || ev.timestamp
+            timestamp: opened?.ev.timestamp || ev.timestamp,
+            enclosingMethod: opened?.enclosingMethod,
+            enclosingClass: classFromMethod(opened?.enclosingMethod),
           });
           closeNode(ev);
           break;
@@ -254,6 +280,7 @@ export class ApexDoctor {
 
         case 'EXCEPTION_THROWN': {
           const frames = parseStackTrace(ev.details);
+          const encMethod = currentEnclosingMethod();
           issues.push({
             severity: 'error',
             type: 'Exception Thrown',
@@ -262,12 +289,15 @@ export class ApexDoctor {
             timestamp: ev.timestamp,
             context: 'An exception was thrown — check the stack trace and surrounding methods.',
             stackFrames: frames.length ? frames : undefined,
+            enclosingMethod: encMethod,
+            enclosingClass: frames[0]?.className ?? classFromMethod(encMethod),
           });
           break;
         }
 
         case 'FATAL_ERROR': {
           const frames = parseStackTrace(ev.details);
+          const encMethod = currentEnclosingMethod();
           issues.push({
             severity: 'fatal',
             type: 'Fatal Error',
@@ -276,6 +306,8 @@ export class ApexDoctor {
             timestamp: ev.timestamp,
             context: 'Execution was halted by this error. This is most likely the root cause.',
             stackFrames: frames.length ? frames : undefined,
+            enclosingMethod: encMethod,
+            enclosingClass: frames[0]?.className ?? classFromMethod(encMethod),
           });
           break;
         }
@@ -337,7 +369,9 @@ export class ApexDoctor {
           message: `Query returned ${q.rows} rows`,
           lineNumber: q.lineNumber,
           timestamp: q.timestamp,
-          context: `Query: ${q.query}`
+          context: `Query: ${q.query}`,
+          enclosingClass: q.enclosingClass,
+          enclosingMethod: q.enclosingMethod,
         });
       }
       if ((q.durationMs ?? 0) >= slowSoqlThresholdMs) {
@@ -347,7 +381,9 @@ export class ApexDoctor {
           message: `Query took ${q.durationMs?.toFixed(2)} ms`,
           lineNumber: q.lineNumber,
           timestamp: q.timestamp,
-          context: `Query: ${q.query}`
+          context: `Query: ${q.query}`,
+          enclosingClass: q.enclosingClass,
+          enclosingMethod: q.enclosingMethod,
         });
       }
       if (flaggedObjects.length) {
@@ -362,6 +398,8 @@ export class ApexDoctor {
               lineNumber: q.lineNumber,
               timestamp: q.timestamp,
               context: `Configured via apexDoctor.flagSoqlOnObjects. Query: ${q.query}`,
+              enclosingClass: q.enclosingClass,
+              enclosingMethod: q.enclosingMethod,
             });
           }
         }
@@ -379,6 +417,8 @@ export class ApexDoctor {
             lineNumber: m.lineNumber,
             timestamp: m.timestamp,
             context: `Threshold: ${slowMethodThresholdMs} ms (apexDoctor.slowMethodThresholdMs)`,
+            enclosingMethod: m.name,
+            enclosingClass: classFromMethod(m.name),
           });
         }
       }
@@ -398,13 +438,19 @@ export class ApexDoctor {
     }
     for (const [normalisedQuery, entries] of queryFrequency) {
       if (entries.length >= soqlInLoopThreshold) {
+        // Take the enclosing class from the first entry that has one — all
+        // iterations of a loop run in the same method, so the first non-empty
+        // sample is representative.
+        const representative = entries.find((e) => e.enclosingClass) ?? entries[0];
         issues.push({
           severity: 'error',
           type: 'SOQL in Loop',
           message: `Same query executed ${entries.length} times — likely inside a loop`,
           lineNumber: entries[0].lineNumber,
           timestamp: entries[0].timestamp,
-          context: `Bulkify: collect IDs into a Set, then run ONE query with WHERE ... IN :ids. Query pattern: ${normalisedQuery.slice(0, 200)}`
+          context: `Bulkify: collect IDs into a Set, then run ONE query with WHERE ... IN :ids. Query pattern: ${normalisedQuery.slice(0, 200)}`,
+          enclosingClass: representative.enclosingClass,
+          enclosingMethod: representative.enclosingMethod,
         });
       }
     }
@@ -558,6 +604,26 @@ function parseStackTrace(details: string): StackFrame[] {
     }
   }
   return frames;
+}
+
+/**
+ * Pull the Apex class name out of a METHOD_ENTRY name like
+ * "AccountValidator.validate(List<Account>)" or "OuterClass.InnerClass.method()".
+ * Returns the first dotted segment, which is the containing .cls file name.
+ * Skips platform namespaces (System, Database, Schema, Limits) and bare names
+ * with no dot, since those aren't user-fixable classes.
+ */
+function classFromMethod(methodName: string | undefined): string | undefined {
+  if (!methodName) { return undefined; }
+  const beforeParen = methodName.split('(')[0];
+  const firstSegment = beforeParen.split('.')[0];
+  if (!firstSegment || !/^[A-Z][A-Za-z0-9_]*$/.test(firstSegment)) { return undefined; }
+  if (['System', 'Database', 'Schema', 'Limits'].includes(firstSegment)) { return undefined; }
+  // "AccountValidator" alone (no dot) is probably a constructor call like
+  // "AccountValidator.AccountValidator()" — only treat it as the enclosing
+  // class if we actually saw a dotted method path.
+  if (!beforeParen.includes('.')) { return undefined; }
+  return firstSegment;
 }
 
 function extractExceptionMessage(details: string): string {
