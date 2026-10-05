@@ -1,6 +1,8 @@
 # Source & config
 src/**
 out/**
+scripts/**
+docs/**
 .vscode/**
 .vscode-test/**
 .vscode-test.mjs

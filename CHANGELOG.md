@@ -1,231 +1,90 @@
 # Changelog
 
-All notable changes to Apex Doctor will be documented in this file.
+All notable changes to Apex Doctor are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [0.12.5] — 2026-07-14
-
-### Fixed
-
-- **Gemini provider broken — `gemini-2.0-flash` was shut down by Google (June 1, 2026).** The default Gemini model no longer exists, so every request on the default failed. The default is now **`gemini-3.5-flash`** (Google's current stable Flash model), and settings still holding the retired `gemini-2.0-flash` / `gemini-2.0-flash-lite` ids are migrated to the current default automatically — the same treatment `openrouter/free` got in v0.12.3. The other provider defaults were re-verified against live sources: `gpt-4o-mini` and `claude-sonnet-4-5` both remain valid.
-
-### Tests
-
-- 57 passing (was 56): retired-Gemini-id migration, including the cross-provider leak case.
-
-## [0.12.4] — 2026-06-16
-
-### Fixed
-
-- **AI features could hang forever on a dropped connection.** The streaming HTTP handlers (and the Einstein request helper) listened for *request* errors but not *response*-stream errors, so a mid-stream network drop (e.g. `ECONNRESET`) went unhandled — `completeOnce`-based features ("Ask the Log", Suggest Fix) never resolved and spun indefinitely, and the stream error could surface as an uncaught exception. All response streams now route errors through the normal error path.
-- **Assistant chat bled across logs.** Opening a different log into an already-open analysis panel (from Recent Logs or a journey chip) reused the webview, whose persisted chat belonged to the *previous* log — so the new log's Assistant drawer showed the old conversation (and export emitted stale text). Persisted chat is now scoped to the analysis it came from and cleared when the panel switches logs.
-- **Active tab reset to Overview after any AI interaction.** Saving chat state overwrote the entire webview state, dropping the persisted active-tab key, so the panel jumped back to Overview on reload. State is now merged instead of overwritten.
-
-## [0.12.3] — 2026-06-16
-
-### Fixed
-
-- **AI analysis silently broken for every provider (regression since v0.12.1).** The disposal-safe `post()` helper added in v0.12.1 called *itself* instead of `panel.webview.postMessage()`, so it recursed until the stack overflowed and the error was swallowed — no AI message (streamed root-cause, follow-up chat, "Ask the Log", or Suggest Fix) ever reached the panel, and the Assistant drawer just hung. It now posts to the webview as intended, so replies stream again and real errors surface instead of being suppressed.
-- **OpenRouter requests rejected — `openrouter/free` is no longer a valid model.** OpenRouter removed that id from its catalogue, so every request failed with an unknown-model error. The default is now a current free model (`google/gemma-4-31b-it:free`), sent together with an OpenRouter `models` fallback array — if a free model rotates out (they change often), OpenRouter automatically tries the next instead of failing. Settings still holding `openrouter/free` are migrated to the current default automatically.
-- **`apexDoctor.model` leaking across providers.** The model setting is shared by all providers, but its default was an OpenRouter id — so selecting Anthropic / OpenAI / Gemini without setting a model sent that OpenRouter id to them too, failing the call. The default is now empty, so each provider falls back to its own correct default.
-
-### Tests
-
-- 56 passing (was 47): model resolution across providers (empty → default, retired-id migration, no cross-provider leak, Einstein isolation, explicit override) and the OpenRouter fallback-list shape.
-
-## [0.12.2] — 2026-06-16
-
-### Fixed
-
-- **OpenRouter (and other LLM providers) failing after configuring Einstein.** The `apexDoctor.model` setting is shared across all providers, so an Einstein model name (`sfdc_ai__*`) selected for Einstein would leak into OpenRouter / OpenAI / Anthropic / Gemini when you switched back, causing the call to fail with an unknown-model error. Model resolution now ignores a model that belongs to a different provider and falls back to the selected provider's default.
-
-## [0.12.1] — 2026-06-16
-
-### Fixed
-
-- **"Webview is disposed" error** when an AI response landed after the analysis panel was closed or replaced. The non-streaming Einstein path widened this race (its reply arrives a few seconds later), but it could affect any provider. All webview messages now route through a disposal-safe `post()` that no-ops once the panel is gone.
-
-## [0.12.0] — 2026-06-16
+## [0.13.0]
 
 ### Added
 
-- **🛡️ Salesforce Einstein provider (Trust Layer)** — a fifth AI option alongside OpenRouter / Anthropic / OpenAI / Gemini, for teams that can't send org data to external LLMs. Routes the root-cause analysis, follow-up chat, "Ask the Log", and Suggest-Fix prompts through your org's **Einstein Models API**, so data stays inside the Salesforce **Einstein Trust Layer** (zero-retention, PII masking, no third-party training). Uses your org's own LLM allocation — no external API key.
-  - Authenticates via an **External Client App** (OAuth client-credentials with the `sfap_api` scope). Configure `apexDoctor.einsteinDomain` (My Domain host) and `apexDoctor.einsteinConsumerKey` in Settings, then store the consumer secret via **"Apex Doctor: Set LLM API Key"** (kept in encrypted SecretStorage).
-  - Calls `POST {domain}/services/data/v62.0/models/{model}/chat-generations` through the Trust Layer, with an in-memory access-token cache. Default model `sfdc_ai__DefaultGPT4OmniMini` — set `apexDoctor.model` to any `sfdc_ai__*` model your org exposes.
-  - Requires an org entitled for Einstein generative AI / Agentforce.
-
-### Tests
-
-- 47 passing (was 43): Einstein response-shape parsing across the current and legacy formats.
-
-## [0.11.0] — 2026-06-12
-
-### Added
-
-- **🗺️ Order-of-Execution map** — the canonical Salesforce save order, reconstructed from the actual transaction. Each save cycle renders as a vertical stepper: before triggers → validation rules → duplicate rules → after triggers → assignment/workflow/escalation rules → record-triggered flows, with fired steps highlighted, silent steps dimmed, never-logged steps greyed, and a **"↻ triggers re-fired"** badge when a workflow field update causes re-entry. Lives at the top of the new Execution tab.
-- **🧵 User-journey stitching** — one UI click in Salesforce often produces several disconnected logs. Apex Doctor now clusters your Recent Analyses by execution-time proximity (same user when known) and renders the cluster as a clickable chip strip — hop between the sibling logs of the same user action with one click.
-
-### Changed (UI restructure — "elegant, not crowded")
-
-- **Four question-oriented tabs**: `Overview · Execution · Performance · Data` (was Overview · Profiler · Tables). Overview now contains only insights, test results, and issues, plus a compact **navigator row** of chips summarising what's inside the other tabs. Execution = journey + order-of-execution + triggers + flows + async + timeline. Performance = CPU + heap profilers + governor limits + debug-level recommendations. Data = the searchable tables.
-- **Assistant drawer** — the AI chat and natural-language "Ask the Log" merged into one slide-over panel opened from a single **🤖 Assistant** button. No more two idle input boxes in the reading flow.
-- **Header de-duplicated** — the metric strip is gone; the verdict banner is now the single place showing ms / SOQL / DML / debugs / errors / warnings. "Executed by" shrank from a card to one muted line. ~300px of redundant header reclaimed.
-- Section headers de-emojied for a calmer hierarchy (icons stay in content where they convey severity).
-
-### Tests
-
-- 43 passing (was 37): order-of-execution reconstruction + re-entry detection + trigger-rooted cycles, and journey clustering / windowing / edge cases.
-
-## [0.10.0] — 2026-06-08
-
-### Added
-
-- **🧠 Heap / memory profiler** — a new section in the Profiler tab that reads `HEAP_ALLOCATE` events, attributes allocated bytes to the enclosing method, and ranks the biggest allocators. Surfaces total allocated bytes, the single biggest allocator, and (when the governor "Maximum heap size" metric is present) peak live-heap as a % of the limit. A heap-pressure issue + insight fire at ≥ 80% / ≥ 60% of the limit. The natural twin of the CPU profiler.
-- **🌊 Flow / Process Builder analysis** — parses `FLOW_*` events into per-flow element timelines with per-element timing, marks DB-bearing elements, and flags "Flow element in loop" when an element runs many times. Shown in the Overview tab beside Trigger Order.
-- **🛠️ CodeAction quick-fixes** — lightbulb fixes directly on `.cls` / `.trigger` files for issues from the most recent analysis (e.g. SOQL-in-loop → bulkify). Only offered when a templated transform actually applies to the open file, so there are no false lightbulbs. Reuses the existing templated-fix + diff-preview flow.
-- **🩺 Activity-bar sidebar** — Apex Doctor now has its own activity-bar icon containing three views: **Current Analysis** (a live outline of the open log — issues, CPU hotspot, biggest allocator, summary; click an issue to jump to its line), **Recent Logs**, and **Recurring Issues** (moved out of the Explorer).
-- **⌨️ Keyboard shortcuts** — `Ctrl/Cmd+Alt+A` (Analyse), `Ctrl/Cmd+Alt+F` (Fetch Log), `Ctrl/Cmd+Alt+T` (Manage Trace Flags).
-- **↻ Trace-flag presets** — the Trace Flag Manager remembers your last (user · debug level · duration) and offers a one-click **Re-trace last user** button.
-- **⤓ CSV export** — per-table "CSV" buttons on the SOQL, DML, and Methods tables copy the rows to the clipboard as CSV.
-- **GitHub Actions CI** — `ci.yml` runs type-check + lint + tests (under `xvfb`) + production package on every push/PR; `release.yml` attaches the built VSIX to each `v*` tag's GitHub Release.
-
-### Tests
-
-- 37 passing (was 31): heap attribution + byte formatting, flow grouping + loop detection, and code-action fix gating. Also hardened the recurring-patterns test against calendar drift.
-
-## [0.9.1] — 2026-05-02
-
-### Fixed
-
-- **Marketplace listing now ships with the up-to-date README and CHANGELOG.** Versions 0.5 → 0.9 were built from a worktree whose docs hadn't been synced from `main`, so the Marketplace page kept showing the v0.3-era listing. No code changes — same v0.9.0 features, properly documented.
-
-## [0.9.0] — 2026-05-01
-
-### Changed (UI polish)
-
-- **Verdict banner at the top of every analysis** — replaces the busy 6-card grid with a single-sentence headline tinted by severity (`✅ Healthy execution`, `🛑 Execution halted — NullPointerException`, etc.) plus a subtle metric line.
-- **Compact horizontal metric strip** — `380 ms · 5 SOQL · 0 DML · 0 errors · 1 warning · 12 debugs` instead of six big cards. Errors / warnings only get a color tint when the count is > 0; everything else stays neutral so visual hierarchy reads top-to-bottom.
-- **Collapsible sections in the Tables tab** — every table is now a `<details>` block with the row count rendered as a chip in the header (e.g. `SOQL Queries · 47`). SOQL is open by default; the rest are closed so a noisy log doesn't push the entire view downwards.
-- **Cleaner table styling** — replaces inter-cell borders with zebra-striped rows + a single underline on the header. Hover state highlights the row. Same data density, much less visual noise.
-- **Tighter insight cards** — minimum width raised from 320px → 360px, padding reduced, gaps tightened, so 1–2 cards per row stays the norm rather than `repeat(auto-fit)` blowing them wide.
-
-No behavioural changes — every feature still works exactly as before. Test count unchanged at 31 passing.
-
-## [0.8.0] — 2026-05-01
-
-### Added
-
-- **📜 Execution-path diff (line-level log diff)** — the Compare Two Logs view now includes an event-by-event diff of significant log events: METHOD_ENTRY, SOQL, DML, code units, debugs, exceptions, callouts, test pass/fail. LCS-based, so insertions / removals / changed events show up exactly where they diverge, with green/red/amber highlighting and per-row markers (`+ − ~`). Reveals "the optimisation skipped the validator entirely" or "the second run took the else branch" — questions the summary deltas can't answer alone.
-- **🧪 Anonymous Apex playground** — write Apex in a scratch editor, click "▶ Run with Apex Doctor" in the status bar (or run `Apex Doctor: Run This Anonymous Apex`), and the extension executes it via `sf apex run`, polls the org for the resulting log, downloads it, and analyses it — all in one progress dialog. Pair with the Trace Flag Manager so the running user has logging enabled.
-- New commands: `Apex Doctor: Open Anonymous Apex Editor`, `Apex Doctor: Run This Anonymous Apex`.
-- `SalesforceService.runAnonymousApex()` and `getMostRecentLogId()` for the run-and-analyse loop.
-
-### Tests
-
-- 31 passing (was 28). New coverage for the LCS line-diff: identical streams, single-event insertions, fingerprint stability across timestamp drift.
-
-## [0.7.0] — 2026-05-01
-
-### Added
-
-- **🔎 SOQL Query Plan integration** — every SOQL row in the Tables tab now has a "Plan" button. One click runs the query through Salesforce's Query Plan tool (`/services/data/vN/query/?explain=`) and renders the result in a side panel: leading-operation type, relative cost, cardinality, considered alternative plans, and any selectivity notes from Salesforce. A verdict banner calls out full-table-scans (`🔴`) vs selective queries (`🟢`). Also exposed via the `Apex Doctor: Run SOQL Query Plan…` command for ad-hoc queries.
-- **🧪 Test coverage overlay** — when a `.cls` or `.trigger` file is open, Apex Doctor draws covered / uncovered lines as subtle green / red gutter icons + line-background tints, sourced from `ApexCodeCoverageAggregate` in your default org. A status-bar item shows the per-class coverage percentage. New commands: `Refresh Test Coverage` (queries the org and caches in workspaceState) and `Toggle Coverage Overlay`. Cached coverage stays available offline; click the status-bar item to toggle.
-- New `SalesforceService` methods: `explainQuery()` (Tooling REST `?explain=` endpoint via `sf api request rest`) and `fetchCoverage()` (`ApexCodeCoverageAggregate` Tooling API).
-
-## [0.6.0] — 2026-05-01
-
-### Added
-
-- **💬 Ask the Log — natural-language query** — a new input box at the top of the Overview tab. Ask things like _"SOQL queries that returned more than 500 rows"_ or _"methods that ran after the exception"_ in plain English; the LLM picks the right array and returns indices we hydrate locally (so it can't fabricate rows). Results render as a focused table.
-- **🔧 Suggest fix — one-click refactor with diff preview** — every issue card now has a "Suggest fix" button. Apex Doctor tries a templated transform first (deterministic, instant), then falls back to the LLM for the long tail. Both paths open a real VS Code diff and require explicit "Apply fix" confirmation — never auto-applies.
-  - **Templated fixes** ship for: SOQL-in-loop bulkification (Set + single query + Map lookup) and adding `LIMIT 200` to a runaway query. More patterns to follow.
-  - **AI fix** sends the full file plus a relevant 40-line window around the issue, asks for the rewritten file in a code block, and uses the result as the proposed change.
-- **`completeOnce` API in AiService** — single-shot non-streaming completion used by the NL query and AI-fix flows. Stitches over the same provider router (OpenRouter / Anthropic / OpenAI / Gemini), so all four work for both features.
-
-### Tests
-
-- Test count up from 22 → 28: bulkification template, missing-LIMIT template, NL query response parsing, and defensive index validation.
-
-## [0.5.0] — 2026-05-01
-
-### Added
-
-- **CPU Profiler** — new Profiler tab with self-time attribution. Computes total − sum(children) at every node, traces the hot path from root to deepest leaf with the highest exclusive time, and surfaces a single bottleneck callout. Two ranked tables: hottest by self time and hottest by total time, each with call count and % of transaction.
-- **Trigger order visualiser** — detects triggers from `CODE_UNIT_STARTED` patterns, groups by sObject + DML phase (Before/After + Insert/Update/Delete/Undelete), flags the slowest trigger in each phase and marks recursive ones.
-- **Async operation tracer** — parses `ASYNC_OPERATION_TRIGGERED`, `FUTURE_METHOD_INVOCATION`, `QUEUEABLE_PENDING` / `ENQUEUE_JOB`. Detects whether the current log is itself an async body (Queueable, Batch, @future, Schedulable). Cross-log linking matches parent invocations against saved Recent Analyses with a confidence score, so you can finally see the full async chain.
-- **Debug-level recommendations** — compares the header debug levels against events that actually appeared. Tells you to raise DB / APEX_PROFILING / SYSTEM when needed, or lower APEX_CODE FINEST when low signal density makes it just noise.
-- **Recurring patterns + sidebar tree view** — mines saved Recent Analyses for issues that repeat 3+ times in the last 7 days, detects SOQL patterns recurring across logs, and computes trend lines for SOQL/DML/duration/errors. New "Apex Doctor: Recurring Issues" tree view in the Explorer sidebar plus a banner at the top of every analysis.
+- **Try with Sample Log** — analyse a bundled log with no org, CLI, or API key
+- **Getting Started walkthrough** — opens on install; reopen via "Open Getting Started Guide"
+- **Automatic model fallback** — if a configured OpenRouter / Gemini model is retired or has no quota, a currently available model is used for the session
+- One-time rating prompt after a few real analyses
 
 ### Changed
 
-- **Webview restructured into three tabs** — `Overview · Profiler · Tables`. The active tab persists across webview reloads via `setState`. New v0.5.0 sections (triggers, async, debug-levels) live inside Overview; the CPU profiler has its own tab.
+- README rewritten around the top features; Commands and Settings tables now generated from package.json
+- Marketplace categories and keywords updated
 
-### Tests
-
-- Test count up from 12 → 22, covering profiler self-time + hot path, trigger grouping + recursion, async invocation parsing + cross-log linking, debug-level recommendations, and recurring pattern detection.
-
-## [0.4.0] — 2026-04-30
+## [0.12.0]
 
 ### Added
 
-- **🎯 Trace Flag Manager** — set up debug logs for any user from VS Code without leaving for Salesforce Setup. Lists active TraceFlag records, creates / extends / deletes flags inline. Smart conflict handling offers to extend an existing flag instead of erroring on a duplicate.
-- **🤖 AI follow-up chat** — keep the conversation going after the initial root-cause explanation; the analysis context stays loaded across turns. Conversation history persists across webview reloads.
-- **Multi-provider LLM support** — adds OpenAI and Google Gemini alongside the existing OpenRouter and Anthropic. Free tiers for OpenRouter and Gemini.
-- **📊 Parsed governor limits** — every `LIMIT_USAGE_FOR_NS` block parsed into structured metrics, rendered as colored progress bars (green &lt;50%, amber 50–80%, red ≥80%).
-- **🔍 Per-table search** — instant client-side filter inputs above SOQL, DML, methods, code units, and debug statements.
-- **🛠️ Inline diagnostics** — issues become red squiggles directly in the open log file, with full Problems-pane integration. Toggle via `apexDoctor.enableInlineDiagnostics`.
-- **🔗 Stack-trace parsing** — exception and fatal-error frames render as clickable class links.
-- **🧪 Apex test result mode** — `TEST_PASS` / `TEST_FAIL` events surface as a dedicated 🧪 section above issues, with pass/fail pills and clickable test class links.
-- **🗂️ Recent analyses tree view** — last 10 analyses persisted per workspace, surfaced in a new Explorer view with click-to-reopen, inline remove, and clear-all toolbar action.
-- **⚙️ Custom heuristic settings** — `slowSoqlThresholdMs` (replaces the hardcoded 1000), `slowMethodThresholdMs` (opt-in), `flagSoqlOnObjects` (warn whenever a query touches a monitored sObject), `enableInlineDiagnostics`.
+- **Salesforce Einstein provider** — AI features run through your org's Einstein Models API; prompts stay inside the Einstein Trust Layer
 
-### Changed
-
-- **Method timing in the Compare view** is now aggregated as **sum + call count** (was max). For batch jobs that hit the same method 100× this gives a meaningful regression delta.
-- **Async file I/O** — replaces blocking `readFileSync` / `writeFileSync` so 50 MB logs don't freeze the extension host.
-- `ApexDoctor` class properly PascalCased; static import for `insights` instead of runtime `require()`.
-- Class-link / line-link clicks now actually wire up (latent bug fix).
-
-## [0.3.1] — 2026-04-24
-
-### Changed
-
-- Refreshed all README screenshots to reflect the latest UI
-- Added dedicated sections for Activity Timeline, tabular data view, and Live Log Streaming
-- Added install instructions for Cursor / VSCodium / Gitpod via Open VSX
-
-## [0.3.0] — 2026-04-23
+## [0.9.0 – 0.11.x]
 
 ### Added
 
-- **Performance Insights** — deterministic, plain-English summary of where time went (SOQL %, slow queries, SOQL-in-loop, fatal errors)
-- **Activity Timeline** — stacked area chart visualising SOQL / DML / methods / callouts over time
-- **Live Log Streaming** — dedicated panel showing logs arriving from the org in real time via `sf apex tail log`
-- **Compare Two Logs** — diff view with verdict banner, method regressions table, SOQL pattern changes, resolved / new issues, and Markdown export
-- **Source code navigation** — click any method name in "Slowest Methods" to jump to its `.cls` file at the exact line; auto-retrieves the class from the org if not in workspace
-- **Auto user info** — fetches and displays which Salesforce user executed each log
-- **Markdown export** — copy the full analysis as a formatted Markdown report for Jira / Slack / PRs
-- **OpenRouter support** — free LLM tier as an alternative to Anthropic Claude
+- Heap / memory profiler
+- Flow and Process Builder analysis, including "element in loop" detection
+- Order-of-Execution map
+- User-journey stitching
+- Editor quick-fixes on `.cls` files
+- Activity-bar sidebar: Current Analysis, Recent Logs, Recurring Issues
 
-### Changed
+## [0.8.0]
 
-- Rebranded from "Apex Log Analyzer by Aman" to **Apex Doctor**
-- Published to the VS Code Marketplace
+### Added
 
-## [0.2.1] — Pre-release
+- Execution-path diff (event-by-event LCS diff) in Compare Two Logs
+- Anonymous Apex playground
 
-- Activity timeline area chart
-- SOQL-in-loop detection
-- Fetch log from Salesforce
+## [0.7.0]
 
-## [0.2.0] — Pre-release
+### Added
 
-- AI root-cause analysis via Anthropic Claude
-- Encrypted API key storage via VS Code SecretStorage
+- SOQL Query Plan integration (per-row Plan button and ad-hoc command)
+- Test coverage gutter overlay
 
-## [0.1.0] — Pre-release
+## [0.6.0]
 
-- Initial parser and analyser
-- Right-click "Analyse this Apex Log" command
+### Added
+
+- Ask the Log — natural-language queries over the parsed log
+- Suggest Fix — templated and AI-assisted refactors with diff preview
+
+## [0.5.0]
+
+### Added
+
+- CPU profiler with self-time attribution, hot path, and bottleneck callout
+- Recurring patterns across saved analyses
+- Async operation tracer
+- Trigger order visualiser
+- Debug-level recommendations
+
+## [0.4.0]
+
+### Added
+
+- Trace Flag Manager
+- Inline log diagnostics (Problems pane)
+- Clickable stack traces
+- Parsed governor limits with progress bars
+- Apex test results panel
+- Recent analyses
+- AI follow-up chat; OpenAI and Gemini providers
+- Custom heuristic settings
+
+## [0.3.0]
+
+### Added
+
+- Performance Insights, activity timeline, live log streaming, Apex class navigation, Compare Two Logs, SOQL-in-loop detection, Markdown export
+
+## [0.1.0]
+
+### Added
+
+- Initial release: Apex log parser, analysis panel, AI root-cause analysis

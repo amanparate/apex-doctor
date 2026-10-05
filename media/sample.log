@@ -1,0 +1,117 @@
+62.0 APEX_CODE,FINEST;APEX_PROFILING,FINE;CALLOUT,INFO;DB,FINEST;SYSTEM,FINE;VALIDATION,INFO;VISUALFORCE,INFO;WAVE,INFO;WORKFLOW,INFO;NBA,INFO
+09:14:22.001 (1000000)|EXECUTION_STARTED
+09:14:22.002 (2000000)|CODE_UNIT_STARTED|[EXTERNAL]|01q5f00000ABcDeFG|OpportunityTrigger on Opportunity trigger event BeforeUpdate|__sfdc_trigger/OpportunityTrigger
+09:14:22.003 (3000000)|METHOD_ENTRY|[1]|01p5f00000ABcDeH|OpportunityTriggerHandler.OpportunityTriggerHandler()
+09:14:22.004 (4000000)|SYSTEM_MODE_ENTER|true
+09:14:22.005 (5000000)|METHOD_EXIT|[1]|OpportunityTriggerHandler
+09:14:22.006 (6000000)|METHOD_ENTRY|[3]|01p5f00000ABcDeH|OpportunityTriggerHandler.beforeUpdate()
+09:14:22.007 (7000000)|STATEMENT_EXECUTE|[5]
+09:14:22.008 (8000000)|HEAP_ALLOCATE|[12]|Bytes:8
+09:14:22.009 (9000000)|VARIABLE_SCOPE_BEGIN|[12]|oppIds|Set<Id>|true|false
+09:14:22.010 (10000000)|VARIABLE_ASSIGNMENT|[12]|oppIds|{}|0x5fa8b2c1
+09:14:22.011 (11000000)|METHOD_ENTRY|[15]|System|System.debug(ANY)
+09:14:22.012 (12000000)|USER_DEBUG|[15]|DEBUG|Starting beforeUpdate trigger for 200 opportunities
+09:14:22.013 (13000000)|METHOD_EXIT|[15]|System.debug(ANY)
+09:14:22.014 (14000000)|HEAP_ALLOCATE|[18]|Bytes:16
+09:14:22.015 (15000000)|SOQL_EXECUTE_BEGIN|[22]|Aggregations:0|SELECT Id, Name, StageName, Amount, CloseDate, AccountId, OwnerId, Probability, Type FROM Opportunity WHERE Id IN :oppIds
+09:14:22.087 (87000000)|SOQL_EXECUTE_END|[22]|Rows:200
+09:14:22.088 (88000000)|HEAP_ALLOCATE|[24]|Bytes:48000
+09:14:22.089 (89000000)|VARIABLE_SCOPE_BEGIN|[25]|acctIds|Set<Id>|true|false
+09:14:22.090 (90000000)|SOQL_EXECUTE_BEGIN|[28]|Aggregations:0|SELECT Id, Name, Industry, AnnualRevenue, Type, BillingCountry, NumberOfEmployees FROM Account WHERE Id IN :acctIds
+09:14:22.145 (145000000)|SOQL_EXECUTE_END|[28]|Rows:180
+09:14:22.150 (150000000)|METHOD_ENTRY|[35]|01p5f00000ABcDeI|AccountValidator.validate(List<Account>)
+09:14:22.151 (151000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.189 (189000000)|SOQL_EXECUTE_END|[40]|Rows:3
+09:14:22.190 (190000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.228 (228000000)|SOQL_EXECUTE_END|[40]|Rows:5
+09:14:22.229 (229000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.266 (266000000)|SOQL_EXECUTE_END|[40]|Rows:2
+09:14:22.267 (267000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.305 (305000000)|SOQL_EXECUTE_END|[40]|Rows:7
+09:14:22.306 (306000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.344 (344000000)|SOQL_EXECUTE_END|[40]|Rows:4
+09:14:22.345 (345000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.383 (383000000)|SOQL_EXECUTE_END|[40]|Rows:6
+09:14:22.384 (384000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.422 (422000000)|SOQL_EXECUTE_END|[40]|Rows:1
+09:14:22.423 (423000000)|SOQL_EXECUTE_BEGIN|[40]|Aggregations:0|SELECT Id, AccountId, Status FROM Contract WHERE AccountId = :currentAcctId
+09:14:22.461 (461000000)|SOQL_EXECUTE_END|[40]|Rows:0
+09:14:22.462 (462000000)|USER_DEBUG|[42]|WARN|SOQL being executed inside a for-loop — this will hit governor limits fast
+09:14:22.463 (463000000)|USER_DEBUG|[45]|INFO|Processed 8 accounts so far, 172 remaining
+09:14:22.464 (464000000)|METHOD_EXIT|[35]|AccountValidator.validate(List<Account>)
+09:14:22.465 (465000000)|METHOD_ENTRY|[52]|01p5f00000ABcDeJ|PricingCalculator.calculate(Opportunity,Account)
+09:14:22.500 (500000000)|SOQL_EXECUTE_BEGIN|[60]|Aggregations:0|SELECT Id, Product2Id, UnitPrice, Quantity, TotalPrice, OpportunityId FROM OpportunityLineItem WHERE OpportunityId IN :oppIds ORDER BY CreatedDate DESC
+09:14:22.732 (732000000)|SOQL_EXECUTE_END|[60]|Rows:4562
+09:14:22.733 (733000000)|USER_DEBUG|[62]|DEBUG|Retrieved 4562 line items from 200 opportunities
+09:14:22.734 (734000000)|LIMIT_USAGE|[62]|SOQL|11|100
+09:14:22.735 (735000000)|LIMIT_USAGE|[62]|SOQL_ROWS|5155|50000
+09:14:22.736 (736000000)|LIMIT_USAGE|[62]|DML|0|150
+09:14:22.737 (737000000)|LIMIT_USAGE|[62]|DML_ROWS|0|10000
+09:14:22.738 (738000000)|LIMIT_USAGE|[62]|CPU_TIME|412|10000
+09:14:22.739 (739000000)|LIMIT_USAGE|[62]|HEAP_SIZE|1248320|6000000
+09:14:22.740 (740000000)|SOQL_EXECUTE_BEGIN|[68]|Aggregations:1|SELECT ProductCode, SUM(TotalPrice) totalRevenue, COUNT(Id) itemCount FROM OpportunityLineItem WHERE OpportunityId IN :oppIds GROUP BY ProductCode HAVING SUM(TotalPrice) > 1000
+09:14:22.845 (845000000)|SOQL_EXECUTE_END|[68]|Rows:47
+09:14:22.846 (846000000)|METHOD_ENTRY|[75]|01p5f00000ABcDeK|CurrencyConverter.convert(Decimal,String,String)
+09:14:22.847 (847000000)|CALLOUT_REQUEST|[82]|System.HttpRequest[Endpoint=https://api.exchangerate.io/v1/latest, Method=GET]
+09:14:22.902 (902000000)|CALLOUT_RESPONSE|[82]|System.HttpResponse[Status=OK, StatusCode=200]
+09:14:22.903 (903000000)|USER_DEBUG|[85]|DEBUG|Exchange rate fetched: 1 USD = 0.923 EUR
+09:14:22.904 (904000000)|METHOD_EXIT|[75]|CurrencyConverter.convert
+09:14:22.910 (910000000)|METHOD_EXIT|[52]|PricingCalculator.calculate
+09:14:22.920 (920000000)|METHOD_ENTRY|[95]|01p5f00000ABcDeL|DiscountEngine.applyDiscounts(List<Opportunity>)
+09:14:22.921 (921000000)|SOQL_EXECUTE_BEGIN|[100]|Aggregations:0|SELECT Id, Name, DiscountPercent__c, ValidFrom__c, ValidTo__c FROM Discount__c WHERE Active__c = true
+09:14:22.988 (988000000)|SOQL_EXECUTE_END|[100]|Rows:1523
+09:14:22.989 (989000000)|USER_DEBUG|[102]|DEBUG|Loaded 1523 active discounts
+09:14:23.050 (1050000000)|METHOD_ENTRY|[115]|System|System.debug(ANY)
+09:14:23.051 (1051000000)|USER_DEBUG|[115]|FINE|Applying discount rule "Q4_ENTERPRISE_TIER_2" to opportunity 006f000000XyZ12AAB
+09:14:23.052 (1052000000)|METHOD_EXIT|[115]|System.debug(ANY)
+09:14:23.060 (1060000000)|USER_DEBUG|[120]|DEBUG|Discount calculation: base=50000, discount=15%, final=42500
+09:14:23.150 (1150000000)|METHOD_EXIT|[95]|DiscountEngine.applyDiscounts
+09:14:23.160 (1160000000)|METHOD_ENTRY|[130]|01p5f00000ABcDeM|EmailNotifier.queueWelcomeEmails(List<Contact>)
+09:14:23.161 (1161000000)|SOQL_EXECUTE_BEGIN|[135]|Aggregations:0|SELECT Id, Email, FirstName, LastName, AccountId FROM Contact WHERE AccountId IN :acctIds
+09:14:23.245 (1245000000)|SOQL_EXECUTE_END|[135]|Rows:892
+09:14:23.246 (1246000000)|USER_DEBUG|[137]|DEBUG|Queuing welcome emails for 892 contacts
+09:14:23.250 (1250000000)|DML_BEGIN|[145]|Op:Insert|Type:Task|Rows:892
+09:14:23.410 (1410000000)|DML_END|[145]
+09:14:23.411 (1411000000)|LIMIT_USAGE|[145]|DML|1|150
+09:14:23.412 (1412000000)|LIMIT_USAGE|[145]|DML_ROWS|892|10000
+09:14:23.413 (1413000000)|METHOD_EXIT|[130]|EmailNotifier.queueWelcomeEmails
+09:14:23.500 (1500000000)|METHOD_ENTRY|[160]|01p5f00000ABcDeN|TerritoryAssigner.assign(List<Opportunity>)
+09:14:23.501 (1501000000)|SOQL_EXECUTE_BEGIN|[165]|Aggregations:0|SELECT Id, Name, Region__c, SalesRep__c, MinAmount__c, MaxAmount__c FROM Territory__c WHERE IsActive__c = true ORDER BY MinAmount__c ASC
+09:14:23.578 (1578000000)|SOQL_EXECUTE_END|[165]|Rows:78
+09:14:23.600 (1600000000)|USER_DEBUG|[170]|DEBUG|Matching 200 opportunities against 78 territories
+09:14:23.700 (1700000000)|USER_DEBUG|[180]|DEBUG|Territory assignments computed
+09:14:23.710 (1710000000)|METHOD_EXIT|[160]|TerritoryAssigner.assign
+09:14:23.800 (1800000000)|METHOD_ENTRY|[200]|01p5f00000ABcDeO|AuditLogger.logChanges(List<SObject>)
+09:14:23.801 (1801000000)|USER_DEBUG|[205]|DEBUG|Recording audit entries for 200 opportunity updates
+09:14:23.810 (1810000000)|DML_BEGIN|[210]|Op:Insert|Type:AuditLog__c|Rows:200
+09:14:23.875 (1875000000)|DML_END|[210]
+09:14:23.876 (1876000000)|METHOD_EXIT|[200]|AuditLogger.logChanges
+09:14:23.900 (1900000000)|METHOD_ENTRY|[220]|01p5f00000ABcDeP|OpportunityValidator.validateStageTransitions(List<Opportunity>,Map<Id,Opportunity>)
+09:14:23.901 (1901000000)|STATEMENT_EXECUTE|[225]
+09:14:23.902 (1902000000)|VARIABLE_ASSIGNMENT|[225]|oppMap|null|0x0
+09:14:23.903 (1903000000)|USER_DEBUG|[228]|WARN|About to iterate over opportunity map that may be null
+09:14:23.904 (1904000000)|FATAL_ERROR|System.NullPointerException: Attempt to de-reference a null object
+
+Class.OpportunityValidator.validateStageTransitions: line 230, column 1
+Class.OpportunityTriggerHandler.beforeUpdate: line 85, column 1
+Trigger.OpportunityTrigger: line 12, column 1
+09:14:23.905 (1905000000)|EXCEPTION_THROWN|[230]|System.NullPointerException: Attempt to de-reference a null object
+09:14:23.906 (1906000000)|METHOD_EXIT|[220]|OpportunityValidator.validateStageTransitions
+09:14:23.907 (1907000000)|METHOD_EXIT|[3]|OpportunityTriggerHandler.beforeUpdate
+09:14:23.908 (1908000000)|CODE_UNIT_FINISHED|OpportunityTrigger on Opportunity trigger event BeforeUpdate
+09:14:23.910 (1910000000)|CUMULATIVE_LIMIT_USAGE
+  LIMIT_USAGE_FOR_NS|(default)|
+    Number of SOQL queries: 14 out of 100
+    Number of query rows: 7507 out of 50000
+    Number of SOSL queries: 0 out of 20
+    Number of DML statements: 2 out of 150
+    Number of DML rows: 1092 out of 10000
+    Maximum CPU time: 1847 out of 10000
+    Maximum heap size: 4234120 out of 6000000
+    Number of callouts: 1 out of 100
+    Number of Email Invocations: 0 out of 10
+    Number of future calls: 0 out of 50
+    Number of queueable jobs added to the queue: 0 out of 50
+    Number of Mobile Apex push calls: 0 out of 10
+
+09:14:23.915 (1915000000)|EXECUTION_FINISHED
