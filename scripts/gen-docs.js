@@ -12,6 +12,7 @@ let readme = fs.readFileSync(readmePath, "utf8");
 
 const cell = (s) =>
   String(s ?? "")
+    .replace(/\\/g, "\\\\")
     .replace(/\|/g, "\\|")
     .replace(/\r?\n/g, " ")
     .trim();
